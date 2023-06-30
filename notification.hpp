@@ -1,6 +1,9 @@
 #ifndef NOTIFICATION_HPP
 #define NOTIFICATION_HPP
 
+#include <stdlib.h>
+#include <memory>
+
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
 
@@ -15,34 +18,47 @@ public:
 
 	struct QueryInterface
 	{
+		typedef std::shared_ptr<QueryInterface> Ptr;
+
 		const char * const QUERY_REQUEST = "request";
 		const char * const QUERY_RESPONSE = "response";
 		const char * const QUERY_ERROR = "error";
 
 		int reqid;
-		const char *type;
+		char* type;
 		struct {
 			union {
-				const char *reason;
+				char* reason;
 				struct {
 					union {
-						const char *reply;
+						char* reply;
 						struct {
-							const char *name, *data;
+							char* name;
+							char* data;
 						};
 					};
 				} query;
 			};
 		} body;
 
+		~QueryInterface();
+
 		const char* serialize();
 		bool parse(const char *json_str);
 	};
 
-	struct Request : public QueryInterface {};
-	struct Response : public QueryInterface {};
+	struct Request : public QueryInterface {
+		Request() {
+			type = strdup(QueryInterface::QUERY_REQUEST);
+		}
+	};
+	struct Response : public QueryInterface {
+		Response() {
+			type = strdup(QueryInterface::QUERY_RESPONSE);
+		}
+	};
 
-	/*class Queue
+	class Queue
 	{
 		amqp_bytes_t queuename;
 	public:
@@ -50,8 +66,13 @@ public:
 		~Queue();
 	};
 
-	Notification::Response send(const char *routingkey, const char *queryName, const char *queryData, bool replyCallback);
-	void listen(const char *bindingkey, void ((int*)callback)(void));*/
+	Notification::Response::Ptr send(
+		const char *routingkey, 
+		const char *queryname, 
+		const char *querydata
+	);
+
+	/*void listen(const char *bindingkey, void ((int*)callback)(void));*/
 };
 
 #endif //NOTIFICATION_HPP

@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <assert.h>
+
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 #include <json-glib/json-gobject.h>
@@ -34,20 +37,20 @@ Notification::~Notification()
 			"Closing connection");
 	die_on_error(amqp_destroy_connection(conn), "Ending connection");
 }
-#if 0
-Notification::Response Notification::send(const char *routingkey, const char *queryName, const char *queryData, bool reply_callback)
+
+Notification::Response::Ptr Notification::send(
+	const char *routingkey, 
+	const char *queryname, 
+	const char *querydata)
 {
 	char const *exchange;
 	char const *messagebody;
 
-	{
-		Notification::Request request;
-		request.reqid = 1;
-		request.type = "query";
-		request.body.queryName = strdup(queryName);
-		request.body.queryData = strdup(queryData);
-		messagebody = request.serialize();
-	}
+	Notification::Request request;
+	request.reqid = 1;
+	request.body.query.name = strdup(queryname);
+	request.body.query.data = strdup(querydata);
+	messagebody = request.serialize();
 
 	amqp_bytes_t reply_to_queue;
 
@@ -62,7 +65,7 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 		reply_to_queue = amqp_bytes_malloc_dup(r->queue);
 		if (reply_to_queue.bytes == NULL) {
 			fprintf(stderr, "Out of memory while copying queue name");
-			return 1;
+			return nullptr;
 		}
 	}
 
@@ -84,7 +87,7 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 		props.reply_to = amqp_bytes_malloc_dup(reply_to_queue);
 		if (props.reply_to.bytes == NULL) {
 			fprintf(stderr, "Out of memory while copying queue name");
-			return 1;
+			return nullptr;
 		}
 		props.correlation_id = amqp_cstring_bytes("1");
 
@@ -151,7 +154,7 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 					fprintf(stderr, "Expected header!");
 					abort();
 				}
-				p =(amqp_basic_properties_t *)frame.payload.properties.decoded;
+				p = (amqp_basic_properties_t *)frame.payload.properties.decoded;
 				if (p->_flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
 					printf("Content-type: %.*s\n",(int)p->content_type.len,
 						(char *)p->content_type.bytes);
@@ -190,8 +193,10 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 			}
 		}
 	}
-}
 
+	return response;
+}
+#if 0
 void Notification::listen(const char *bindingkey, const char *queryName, const char *queryData, bool reply_callback)
 {
 	amqp_bytes_t queuename;
@@ -281,6 +286,25 @@ void Notification::listen(const char *bindingkey, const char *queryName, const c
 }
 #endif
 
+Notification::QueryInterface::~QueryInterface()
+{
+	if (strcmp(type,
+		Notification::QueryInterface::QUERY_ERROR) == 0) {
+		free(body.reason);
+	}
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_REQUEST) == 0) {
+		free(body.query.name);
+		free(body.query.data);
+	}
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+		free(body.query.reply);
+	}
+
+	free(type);
+}
+
 const char* Notification::QueryInterface::serialize()
 {
 	JsonBuilder *builder = json_builder_new();
@@ -295,11 +319,13 @@ const char* Notification::QueryInterface::serialize()
 	json_builder_set_member_name(builder, "body");
 	json_builder_begin_object(builder);
 	
-	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
+	if (strcmp(type,
+		Notification::QueryInterface::QUERY_ERROR) == 0) {
 		json_builder_set_member_name(builder, "reason");
 		json_builder_add_string_value(builder, body.reason);
 	}
-	else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_REQUEST) == 0) {
 		json_builder_set_member_name(builder, "query");
 		json_builder_begin_object(builder);
 
@@ -311,7 +337,8 @@ const char* Notification::QueryInterface::serialize()
 
 		json_builder_end_object(builder);
 	}
-	else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
 		json_builder_set_member_name(builder, "query");
 		json_builder_begin_object(builder);
 
@@ -354,12 +381,14 @@ bool Notification::QueryInterface::parse(const char *json_str)
 
 	json_reader_read_member(reader, "body");
 
-	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
+	if (strcmp(type,
+		Notification::QueryInterface::QUERY_ERROR) == 0) {
 		json_reader_read_member(reader, "reason");
 		body.reason = strdup(json_reader_get_string_value(reader));
 		json_reader_end_member(reader);
 	}
-	else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_REQUEST) == 0) {
 		json_reader_read_member(reader, "query");
 		
 		json_reader_read_member(reader, "name");
@@ -372,7 +401,8 @@ bool Notification::QueryInterface::parse(const char *json_str)
 		
 		json_reader_end_member(reader);
 	} 
-	else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+	else if (strcmp(type,
+		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
 		json_reader_read_member(reader, "query");
 		
 		json_reader_read_member(reader, "reply");
