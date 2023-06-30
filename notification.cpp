@@ -1,3 +1,7 @@
+#include <glib-object.h>
+#include <json-glib/json-glib.h>
+#include <json-glib/json-gobject.h>
+
 #include "notification.hpp"
 #include "utils.h"
 
@@ -30,34 +34,7 @@ Notification::~Notification()
 			"Closing connection");
 	die_on_error(amqp_destroy_connection(conn), "Ending connection");
 }
-
-/*
-	Notification notification("localhost", 5672);
-	try {
-		auto response = notification.request("admin-api", "get-user-info-by-iin", "{\"iin\":00525}");
-		auto res = notification.notify("#", "update-config", "{CONFIG_META}");
-		
-		auto res = notification.send(
-			route,
-			queryName,
-			queryData,
-			true
-		);
-	} catch () {
-
-	}
-
-	Notification notification("localhost", 5672);
-
-	notification.listen(
-		"admin-api",
-		"get-user-info-by-iin",
-		"",
-		reply_callback
-	);
-	//notification.onNotify("admin-api", );
-*/
-
+#if 0
 Notification::Response Notification::send(const char *routingkey, const char *queryName, const char *queryData, bool reply_callback)
 {
 	char const *exchange;
@@ -141,7 +118,7 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 			size_t body_target;
 			size_t body_received;
 
-			for (;;) {
+			for(;;) {
 				amqp_maybe_release_buffers(conn);
 				result = amqp_simple_wait_frame(conn, &frame);
 				printf("Result: %d\n", result);
@@ -159,10 +136,10 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 					continue;
 				}
 
-				d = (amqp_basic_deliver_t *)frame.payload.method.decoded;
+				d =(amqp_basic_deliver_t *)frame.payload.method.decoded;
 				printf("Delivery: %u exchange: %.*s routingkey: %.*s\n",
-					(unsigned)d->delivery_tag, (int)d->exchange.len,
-					(char *)d->exchange.bytes, (int)d->routing_key.len,
+					(unsigned)d->delivery_tag,(int)d->exchange.len,
+					(char *)d->exchange.bytes,(int)d->routing_key.len,
 					(char *)d->routing_key.bytes);
 
 				result = amqp_simple_wait_frame(conn, &frame);
@@ -174,17 +151,17 @@ Notification::Response Notification::send(const char *routingkey, const char *qu
 					fprintf(stderr, "Expected header!");
 					abort();
 				}
-				p = (amqp_basic_properties_t *)frame.payload.properties.decoded;
+				p =(amqp_basic_properties_t *)frame.payload.properties.decoded;
 				if (p->_flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
-					printf("Content-type: %.*s\n", (int)p->content_type.len,
+					printf("Content-type: %.*s\n",(int)p->content_type.len,
 						(char *)p->content_type.bytes);
 				}
 				printf("----\n");
 
-				body_target = (size_t)frame.payload.properties.body_size;
+				body_target =(size_t)frame.payload.properties.body_size;
 				body_received = 0;
 
-				while (body_received < body_target) {
+				while(body_received < body_target) {
 					result = amqp_simple_wait_frame(conn, &frame);
 					if (result < 0) {
 						break;
@@ -238,7 +215,7 @@ void Notification::listen(const char *bindingkey, const char *queryName, const c
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 
 	{
-		for (;;) {
+		for(;;) {
 			amqp_rpc_reply_t res;
 			amqp_envelope_t envelope;
 
@@ -251,8 +228,8 @@ void Notification::listen(const char *bindingkey, const char *queryName, const c
 			}
 
 			printf("Delivery %u, exchange %.*s routingkey %.*s\n",
-				(unsigned)envelope.delivery_tag, (int)envelope.exchange.len,
-				(char *)envelope.exchange.bytes, (int)envelope.routing_key.len,
+				(unsigned)envelope.delivery_tag,(int)envelope.exchange.len,
+				(char *)envelope.exchange.bytes,(int)envelope.routing_key.len,
 				(char *)envelope.routing_key.bytes);
 
 			if (envelope.message.properties._flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
@@ -301,4 +278,110 @@ void Notification::listen(const char *bindingkey, const char *queryName, const c
 	}
 
 	amqp_bytes_free(queuename);
+}
+#endif
+
+const char* Notification::QueryInterface::serialize()
+{
+	JsonBuilder *builder = json_builder_new();
+	json_builder_begin_object(builder);
+
+	json_builder_set_member_name(builder, "reqid");
+	json_builder_add_int_value(builder, reqid);
+
+	json_builder_set_member_name(builder, "type");
+	json_builder_add_string_value(builder, type);
+
+	json_builder_set_member_name(builder, "body");
+	json_builder_begin_object(builder);
+	
+	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
+		json_builder_set_member_name(builder, "reason");
+		json_builder_add_string_value(builder, body.reason);
+	} else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
+		json_builder_set_member_name(builder, "query");
+		json_builder_begin_object(builder);
+
+		json_builder_set_member_name(builder, "name");
+		json_builder_add_string_value(builder, body.query.name);
+
+		json_builder_set_member_name(builder, "data");
+		json_builder_add_string_value(builder, body.query.data);
+
+		json_builder_end_object(builder);
+	} else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+		json_builder_set_member_name(builder, "query");
+		json_builder_begin_object(builder);
+
+		json_builder_set_member_name(builder, "reply");
+		json_builder_add_string_value(builder, body.query.reply);
+
+		json_builder_end_object(builder);
+	}
+
+	json_builder_end_object(builder);
+
+	json_builder_end_object(builder);
+
+	JsonGenerator *gen = json_generator_new();
+	JsonNode * root = json_builder_get_root(builder);
+	json_generator_set_root(gen, root);
+	gchar *json_str = json_generator_to_data(gen, NULL);
+
+	json_node_free(root);
+	g_object_unref(gen);
+	g_object_unref(builder);
+
+	return (const char *)json_str;
+}
+
+bool Notification::QueryInterface::parse(const char *json_str)
+{
+	JsonParser *parser = json_parser_new();
+	json_parser_load_from_data(parser, json_str, -1, NULL);
+
+	JsonReader *reader = json_reader_new(json_parser_get_root(parser));
+
+	json_reader_read_member(reader, "reqid");
+	reqid = json_reader_get_int_value(reader);
+	json_reader_end_member(reader);
+
+	json_reader_read_member(reader, "type");
+	type = strdup(json_reader_get_string_value(reader));
+	json_reader_end_member(reader);
+
+	json_reader_read_member(reader, "body");
+
+	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
+		json_reader_read_member(reader, "reason");
+		body.reason = strdup(json_reader_get_string_value(reader));
+		json_reader_end_member(reader);
+	} else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
+		json_reader_read_member(reader, "query");
+		
+		json_reader_read_member(reader, "name");
+		body.query.name = strdup(json_reader_get_string_value(reader));
+		json_reader_end_member(reader);
+
+		json_reader_read_member(reader, "data");
+		body.query.data = strdup(json_reader_get_string_value(reader));
+		json_reader_end_member(reader);
+		
+		json_reader_end_member(reader);
+	} else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+		json_reader_read_member(reader, "query");
+		
+		json_reader_read_member(reader, "reply");
+		body.query.reply = strdup(json_reader_get_string_value(reader));
+		json_reader_end_member(reader);
+		
+		json_reader_end_member(reader);
+	}
+
+	json_reader_end_member(reader);
+
+	g_object_unref(reader);
+	g_object_unref(parser);
+
+	return true;
 }

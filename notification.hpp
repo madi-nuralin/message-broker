@@ -13,35 +13,36 @@ public:
 	Notification(const char* hostname, int port);
 	virtual ~Notification();
 
-	struct Request
+	struct QueryInterface
 	{
+		const char * const QUERY_REQUEST = "request";
+		const char * const QUERY_RESPONSE = "response";
+		const char * const QUERY_ERROR = "error";
+
 		int reqid;
 		const char *type;
 		struct {
-			const char *queryName;
-			const char *queryData;
+			union {
+				const char *reason;
+				struct {
+					union {
+						const char *reply;
+						struct {
+							const char *name, *data;
+						};
+					};
+				} query;
+			};
 		} body;
 
-		char* serialize();
-		Request deserialize(const char *json_str);
+		const char* serialize();
+		bool parse(const char *json_str);
 	};
 
-	struct Response
-	{
-		int reqid;
-		const char *type;
-		const char *body;
+	struct Request : public QueryInterface {};
+	struct Response : public QueryInterface {};
 
-		struct {
-			const char *queryName;
-			const char *queryData;
-		} body;
-
-		char* serialize();
-		Request deserialize(const char *json_str);
-	};
-
-	class Queue
+	/*class Queue
 	{
 		amqp_bytes_t queuename;
 	public:
@@ -50,7 +51,7 @@ public:
 	};
 
 	Notification::Response send(const char *routingkey, const char *queryName, const char *queryData, bool replyCallback);
-	void listen(const char *bindingkey, void ((int*)callback)(void));
+	void listen(const char *bindingkey, void ((int*)callback)(void));*/
 };
 
 #endif //NOTIFICATION_HPP
