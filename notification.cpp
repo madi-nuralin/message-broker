@@ -288,17 +288,14 @@ void Notification::listen(const char *bindingkey, const char *queryName, const c
 
 Notification::QueryInterface::~QueryInterface()
 {
-	if (strcmp(type,
-		Notification::QueryInterface::QUERY_ERROR) == 0) {
+	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
 		free(body.reason);
 	}
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_REQUEST) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
 		free(body.query.name);
 		free(body.query.data);
 	}
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
 		free(body.query.reply);
 	}
 
@@ -319,13 +316,11 @@ const char* Notification::QueryInterface::serialize()
 	json_builder_set_member_name(builder, "body");
 	json_builder_begin_object(builder);
 	
-	if (strcmp(type,
-		Notification::QueryInterface::QUERY_ERROR) == 0) {
+	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
 		json_builder_set_member_name(builder, "reason");
 		json_builder_add_string_value(builder, body.reason);
 	}
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_REQUEST) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
 		json_builder_set_member_name(builder, "query");
 		json_builder_begin_object(builder);
 
@@ -337,8 +332,7 @@ const char* Notification::QueryInterface::serialize()
 
 		json_builder_end_object(builder);
 	}
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
 		json_builder_set_member_name(builder, "query");
 		json_builder_begin_object(builder);
 
@@ -381,14 +375,12 @@ bool Notification::QueryInterface::parse(const char *json_str)
 
 	json_reader_read_member(reader, "body");
 
-	if (strcmp(type,
-		Notification::QueryInterface::QUERY_ERROR) == 0) {
+	if (strcmp(type, Notification::QueryInterface::QUERY_ERROR) == 0) {
 		json_reader_read_member(reader, "reason");
 		body.reason = strdup(json_reader_get_string_value(reader));
 		json_reader_end_member(reader);
 	}
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_REQUEST) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_REQUEST) == 0) {
 		json_reader_read_member(reader, "query");
 		
 		json_reader_read_member(reader, "name");
@@ -401,8 +393,7 @@ bool Notification::QueryInterface::parse(const char *json_str)
 		
 		json_reader_end_member(reader);
 	} 
-	else if (strcmp(type,
-		Notification::QueryInterface::QUERY_RESPONSE) == 0) {
+	else if (strcmp(type, Notification::QueryInterface::QUERY_RESPONSE) == 0) {
 		json_reader_read_member(reader, "query");
 		
 		json_reader_read_member(reader, "reply");
