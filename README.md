@@ -1,1 +1,1 @@
-# rabbitmq-notification
+# message-broker
