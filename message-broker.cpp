@@ -39,16 +39,14 @@ MessageBroker::~MessageBroker()
 	die_on_error(amqp_destroy_connection(conn), "Ending connection");
 }
 
-MessageBroker::Response::Ptr MessageBroker::send(const char *routingkey, const char *queryname, const char *querydata)
+MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const char *routingkey, const char *query)
 {
-	char const *exchange = "amq.direct";
 	char const *messagebody;
 
 	MessageBroker::Response::Ptr response;
 	MessageBroker::Request request;
 	request.reqid = 1;
-	request.body.query.name = strdup(queryname);
-	request.body.query.data = strdup(querydata);
+	request.body = query;
 	messagebody = request.serialize();
 
 	amqp_bytes_t reply_to_queue;
@@ -196,111 +194,104 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *routingkey, const c
 	return response;
 }
 
-int MessageBroker::listen(const char *bindingkey, bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response))
+int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response))
 {
-	char * const exchange = "amq.direct";
-
-	amqp_bytes_t queuename;
+	std::thread t1([this, exchange, bindingkey, callback]()
 	{
-		amqp_queue_declare_ok_t *r = amqp_queue_declare(
-			conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
-		die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring queue");
-		queuename = amqp_bytes_malloc_dup(r->queue);
-		if (queuename.bytes == NULL) {
-			fprintf(stderr, "Out of memory while copying queue name");
-			return 1;
+		amqp_bytes_t queuename;
+		{
+			amqp_queue_declare_ok_t *r = amqp_queue_declare(
+				conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+			die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring queue");
+			queuename = amqp_bytes_malloc_dup(r->queue);
+			if (queuename.bytes == NULL) {
+				fprintf(stderr, "Out of memory while copying queue name");
+				return 1;
+			}
 		}
-	}
 
-	amqp_queue_bind(conn, 1, queuename, amqp_cstring_bytes(exchange),
-		amqp_cstring_bytes(bindingkey), amqp_empty_table);
-	die_on_amqp_error(amqp_get_rpc_reply(conn), "Binding queue");
+		amqp_queue_bind(conn, 1, queuename, amqp_cstring_bytes(exchange),
+			amqp_cstring_bytes(bindingkey), amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(conn), "Binding queue");
 
-	amqp_basic_consume(conn, 1, queuename, amqp_empty_bytes, 0, 1, 0,
-		amqp_empty_table);
-	die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
+		amqp_basic_consume(conn, 1, queuename, amqp_empty_bytes, 0, 1, 0,
+			amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 
-	{
-		for(;;) {
-			amqp_rpc_reply_t res;
-			amqp_envelope_t envelope;
+		{
+			for(;;) {
+				amqp_rpc_reply_t res;
+				amqp_envelope_t envelope;
 
-			amqp_maybe_release_buffers(conn);
+				amqp_maybe_release_buffers(conn);
 
-			res = amqp_consume_message(conn, &envelope, NULL, 0);
+				res = amqp_consume_message(conn, &envelope, NULL, 0);
 
-			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-				break;
-			}
-
-			printf("Delivery %u, exchange %.*s routingkey %.*s\n",
-				(unsigned)envelope.delivery_tag,(int)envelope.exchange.len,
-				(char *)envelope.exchange.bytes,(int)envelope.routing_key.len,
-				(char *)envelope.routing_key.bytes);
-
-			if (envelope.message.properties._flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
-				printf("Content-type: %.*s\n",
-					(int)envelope.message.properties.content_type.len,
-					(char *)envelope.message.properties.content_type.bytes);
-			}
-			printf("----\n");
-
-			amqp_dump(envelope.message.body.bytes, envelope.message.body.len);
-
-			/*
-				send reply
-			*/
-
-			{
-				/*
-					set properties
-				*/
-				amqp_basic_properties_t props;
-				props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG |
-							   AMQP_BASIC_DELIVERY_MODE_FLAG |
-							   AMQP_BASIC_REPLY_TO_FLAG |
-							   AMQP_BASIC_CORRELATION_ID_FLAG;
-				props.content_type = amqp_cstring_bytes("application/json");
-				props.delivery_mode = 2; /* persistent delivery mode */
-				props.reply_to = amqp_bytes_malloc_dup(envelope.message.properties.reply_to);
-				if (props.reply_to.bytes == NULL) {
-					fprintf(stderr, "Out of memory while copying queue name");
-					return 1;
+				if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+					break;
 				}
-				props.correlation_id = envelope.message.properties.correlation_id;
+
+				printf("Delivery %u, exchange %.*s routingkey %.*s\n",
+					(unsigned)envelope.delivery_tag,(int)envelope.exchange.len,
+					(char *)envelope.exchange.bytes,(int)envelope.routing_key.len,
+					(char *)envelope.routing_key.bytes);
+
+				if (envelope.message.properties._flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
+					printf("Content-type: %.*s\n",
+						(int)envelope.message.properties.content_type.len,
+						(char *)envelope.message.properties.content_type.bytes);
+				}
+				printf("----\n");
+
+				amqp_dump(envelope.message.body.bytes, envelope.message.body.len);
 
 				/*
-					publish
+					send reply
 				*/
-				die_on_error(amqp_basic_publish(conn, 1, amqp_empty_bytes,
-						amqp_cstring_bytes((char *)envelope.message.properties.reply_to.bytes), 0, 0,
-						&props, amqp_cstring_bytes((const char*)envelope.message.body.bytes)),
-					"Publishing");
 
-				amqp_bytes_free(props.reply_to);
+				{
+					/*
+						set properties
+					*/
+					amqp_basic_properties_t props;
+					props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG |
+								   AMQP_BASIC_DELIVERY_MODE_FLAG |
+								   AMQP_BASIC_REPLY_TO_FLAG |
+								   AMQP_BASIC_CORRELATION_ID_FLAG;
+					props.content_type = amqp_cstring_bytes("application/json");
+					props.delivery_mode = 2; /* persistent delivery mode */
+					props.reply_to = amqp_bytes_malloc_dup(envelope.message.properties.reply_to);
+					if (props.reply_to.bytes == NULL) {
+						fprintf(stderr, "Out of memory while copying queue name");
+						return 1;
+					}
+					props.correlation_id = envelope.message.properties.correlation_id;
+
+					MessageBroker::Request request;
+					MessageBroker::Response response;
+					request.parse((const char*)envelope.message.body.bytes);
+					response.reqid = request.reqid;
+					callback(request, response);
+
+					/*
+						publish
+					*/
+					die_on_error(amqp_basic_publish(conn, 1, amqp_empty_bytes,
+							amqp_cstring_bytes((char *)envelope.message.properties.reply_to.bytes), 0, 0,
+							&props, amqp_cstring_bytes((const char*)response.serialize())),
+						"Publishing");
+
+					amqp_bytes_free(props.reply_to);
+				}
+
+				amqp_destroy_envelope(&envelope);
 			}
-
-			amqp_destroy_envelope(&envelope);
 		}
-	}
 
-	amqp_bytes_free(queuename);
-}
+		amqp_bytes_free(queuename);
+	});
 
-MessageBroker::QueryInterface::~QueryInterface()
-{
-	if (strcmp(type, MessageBroker::QueryInterface::QUERY_ERROR) == 0) {
-		free(body.reason);
-	}
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_REQUEST) == 0) {
-		free(body.query.name);
-		free(body.query.data);
-	}
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_RESPONSE) == 0) {
-		free(body.query.reply);
-	}
-
-	free(type);
+	t1.detach();
 }
 
 const char* MessageBroker::QueryInterface::serialize()
@@ -312,39 +303,11 @@ const char* MessageBroker::QueryInterface::serialize()
 	json_builder_add_int_value(builder, reqid);
 
 	json_builder_set_member_name(builder, "type");
-	json_builder_add_string_value(builder, type);
+	json_builder_add_string_value(builder, type.c_str());
 
 	json_builder_set_member_name(builder, "body");
-	json_builder_begin_object(builder);
+	json_builder_add_string_value(builder, body.c_str());
 	
-	if (strcmp(type, MessageBroker::QueryInterface::QUERY_ERROR) == 0) {
-		json_builder_set_member_name(builder, "reason");
-		json_builder_add_string_value(builder, body.reason);
-	}
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_REQUEST) == 0) {
-		json_builder_set_member_name(builder, "query");
-		json_builder_begin_object(builder);
-
-		json_builder_set_member_name(builder, "name");
-		json_builder_add_string_value(builder, body.query.name);
-
-		json_builder_set_member_name(builder, "data");
-		json_builder_add_string_value(builder, body.query.data);
-
-		json_builder_end_object(builder);
-	}
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_RESPONSE) == 0) {
-		json_builder_set_member_name(builder, "query");
-		json_builder_begin_object(builder);
-
-		json_builder_set_member_name(builder, "reply");
-		json_builder_add_string_value(builder, body.query.reply);
-
-		json_builder_end_object(builder);
-	}
-
-	json_builder_end_object(builder);
-
 	json_builder_end_object(builder);
 
 	JsonGenerator *gen = json_generator_new();
@@ -371,39 +334,11 @@ bool MessageBroker::QueryInterface::parse(const char *json_str)
 	json_reader_end_member(reader);
 
 	json_reader_read_member(reader, "type");
-	type = strdup(json_reader_get_string_value(reader));
+	type = json_reader_get_string_value(reader);
 	json_reader_end_member(reader);
 
 	json_reader_read_member(reader, "body");
-
-	if (strcmp(type, MessageBroker::QueryInterface::QUERY_ERROR) == 0) {
-		json_reader_read_member(reader, "reason");
-		body.reason = strdup(json_reader_get_string_value(reader));
-		json_reader_end_member(reader);
-	}
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_REQUEST) == 0) {
-		json_reader_read_member(reader, "query");
-		
-		json_reader_read_member(reader, "name");
-		body.query.name = strdup(json_reader_get_string_value(reader));
-		json_reader_end_member(reader);
-
-		json_reader_read_member(reader, "data");
-		body.query.data = strdup(json_reader_get_string_value(reader));
-		json_reader_end_member(reader);
-		
-		json_reader_end_member(reader);
-	} 
-	else if (strcmp(type, MessageBroker::QueryInterface::QUERY_RESPONSE) == 0) {
-		json_reader_read_member(reader, "query");
-		
-		json_reader_read_member(reader, "reply");
-		body.query.reply = strdup(json_reader_get_string_value(reader));
-		json_reader_end_member(reader);
-		
-		json_reader_end_member(reader);
-	}
-
+	body = json_reader_get_string_value(reader);
 	json_reader_end_member(reader);
 
 	g_object_unref(reader);

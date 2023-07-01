@@ -1,8 +1,8 @@
 #ifndef MESSAGE_BROKER_HPP
 #define MESSAGE_BROKER_HPP
 
-#include <string.h>
 #include <memory>
+#include <string>
 
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
@@ -25,23 +25,7 @@ public:
 		const char * const QUERY_ERROR = "error";
 
 		int reqid;
-		char* type;
-		struct {
-			union {
-				char* reason;
-				struct {
-					union {
-						char* reply;
-						struct {
-							char* name;
-							char* data;
-						};
-					};
-				} query;
-			};
-		} body;
-
-		~QueryInterface();
+		std::string type, body;
 
 		const char* serialize();
 		bool parse(const char *json_str);
@@ -49,13 +33,13 @@ public:
 
 	struct Request : public QueryInterface {
 		Request() {
-			type = strdup(QueryInterface::QUERY_REQUEST);
+			type = QueryInterface::QUERY_REQUEST;
 		}
 	};
 
 	struct Response : public QueryInterface {
 		Response() {
-			type = strdup(QueryInterface::QUERY_RESPONSE);
+			type = QueryInterface::QUERY_RESPONSE;
 		}
 	};
 
@@ -68,12 +52,13 @@ public:
 	};
 
 	MessageBroker::Response::Ptr send(
+		const char *exchange,
 		const char *routingkey,
-		const char *queryname,
-		const char *querydata
+		const char *query
 	);
 
 	int listen(
+		const char *exchange,
 		const char *bindingkey,
 		bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response)
 	);
