@@ -9,6 +9,10 @@
 #include "message-broker.hpp"
 #include "utils.h"
 
+const char * const MessageBroker::QueryInterface::QUERY_REQUEST = "request";
+const char * const MessageBroker::QueryInterface::QUERY_RESPONSE = "response";
+const char * const MessageBroker::QueryInterface::QUERY_ERROR = "error";
+
 MessageBroker::MessageBroker(const char* hostname, int port)
 {
 	conn = amqp_new_connection();
@@ -307,7 +311,7 @@ const char* MessageBroker::QueryInterface::serialize()
 
 	json_builder_set_member_name(builder, "body");
 	json_builder_add_string_value(builder, body.c_str());
-	
+
 	json_builder_end_object(builder);
 
 	JsonGenerator *gen = json_generator_new();

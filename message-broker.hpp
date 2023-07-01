@@ -20,9 +20,9 @@ public:
 	{
 		typedef std::shared_ptr<QueryInterface> Ptr;
 
-		const char * const QUERY_REQUEST = "request";
-		const char * const QUERY_RESPONSE = "response";
-		const char * const QUERY_ERROR = "error";
+		static const char * const QUERY_REQUEST;
+		static const char * const QUERY_RESPONSE;
+		static const char * const QUERY_ERROR;
 
 		int reqid;
 		std::string type, body;
