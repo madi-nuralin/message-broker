@@ -9,7 +9,6 @@
 #include <assert.h>
 
 #include "utils.h"
-#include "notification.hpp"
 
 int main(int argc, char const *const *argv)
 {

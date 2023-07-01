@@ -1,20 +1,20 @@
-#ifndef NOTIFICATION_HPP
-#define NOTIFICATION_HPP
+#ifndef MESSAGE_BROKER_HPP
+#define MESSAGE_BROKER_HPP
 
-#include <stdlib.h>
+#include <string.h>
 #include <memory>
 
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
 
-class Notification
+class MessageBroker
 {
 	amqp_socket_t *socket;
 	amqp_connection_state_t conn;
 
 public:
-	Notification(const char* hostname, int port);
-	virtual ~Notification();
+	MessageBroker(const char* hostname, int port);
+	virtual ~MessageBroker();
 
 	struct QueryInterface
 	{
@@ -52,6 +52,7 @@ public:
 			type = strdup(QueryInterface::QUERY_REQUEST);
 		}
 	};
+
 	struct Response : public QueryInterface {
 		Response() {
 			type = strdup(QueryInterface::QUERY_RESPONSE);
@@ -66,13 +67,16 @@ public:
 		~Queue();
 	};
 
-	Notification::Response::Ptr send(
-		const char *routingkey, 
-		const char *queryname, 
+	MessageBroker::Response::Ptr send(
+		const char *routingkey,
+		const char *queryname,
 		const char *querydata
 	);
 
-	/*void listen(const char *bindingkey, void ((int*)callback)(void));*/
+	int listen(
+		const char *bindingkey,
+		bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response)
+	);
 };
 
-#endif //NOTIFICATION_HPP
+#endif //MESSAGE_BROKER_HPP
