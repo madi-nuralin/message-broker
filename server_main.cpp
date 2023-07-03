@@ -21,7 +21,7 @@ int main(int argc, char const *argv[])
 		[users](const MessageBroker::Request &request, MessageBroker::Response &response)
 	{
 		g_autoptr(JsonParser) parser = json_parser_new();
-		json_parser_load_from_data(parser, (gchar*)(request.serializeBody()), -1, NULL);
+		json_parser_load_from_data(parser, (gchar*)(request.json_str_body()), -1, NULL);
 		g_autoptr(JsonReader) reader = json_reader_new(json_parser_get_root(parser));
 
 		json_reader_read_member(reader, "query_name");
@@ -37,12 +37,12 @@ int main(int argc, char const *argv[])
 		std::cout << queryName << std::endl;
 		for (const auto &user : users) {
 			if (user.id == userId) {
-				response.parseBody(users[0].serialize());
+				response.set_body(users[0].serialize());
 				return true;
 			}
 		}
 
-		response.parseBody("{\"reason\":\"could not find user with id\"}");		
+		response.set_body("{\"reason\":\"could not find user with id\"}");		
 		return false;
 	});
 

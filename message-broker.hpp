@@ -18,54 +18,63 @@ public:
 	MessageBroker(const char* hostname, int port);
 	virtual ~MessageBroker();
 
-	struct QueryInterface
+	class QueryInterface
 	{
+	protected:
+		int _id;
+		std::string _type;
+		JsonNode *_body;
+
+	public:
 		typedef std::shared_ptr<QueryInterface> Ptr;
 
 		static const char * const QUERY_REQUEST;
 		static const char * const QUERY_RESPONSE;
 		static const char * const QUERY_ERROR;
 
-		int reqid;
-		std::string type;
-		JsonNode *body;
+	//public:
+	//       QueryInterface(const char *json_str);
+	//       virtual ~QueryInterface();
 
-         //public:
-         //       QueryInterface(const char *json_str);
-         //       virtual ~QueryInterface();
+	//       int getId() const;
+	//       char* getType() const;
+	//       JsonNode* getBody() const;
+	//       bool setBody(const char *json_str) const;
+	//       bool setBody(const JsonNode *node) const;
+	//       char* toJsonString() const;
+	//       char* bodyToJsonString() const;
+	    
+	//protected:
+	//       bool setType(const char *type);
 
-         //       int getId() const;
-         //       char* getType() const;
-         //       JsonNode* getBody() const;
-         //       bool setBody(const char *json_str) const;
-         //       bool setBody(const JsonNode *node) const;
-         //       char* toJsonString() const;
-         //       char* bodyToJsonString() const;
-                
-         //protected:
-         //       bool setType(const char *type);
+		QueryInterface();
+		QueryInterface(const char* json_str);
+		//~QueryInterface();
 
-         //private:
-         //     int _reqid;
-	//	char *_type;
-	//	JsonNode *_body;
+		int id() const {return _id;}
+		std::string type() const {return _type;}
+		JsonNode* body() const {return _body;}
+		bool set_type(const char* type);
+		bool set_body(const char* json_str);
+		bool set_body(const JsonNode* node);
+		char* json_str() const;
+		char* json_str_body() const;
 
-		bool parse(const char* json_str);
-		bool parseBody(const char* json_str);
-
-		char* serialize() const;
-		char* serializeBody() const;
 	};
 
-	struct Request : public QueryInterface {
-		Request() {
-			type = QueryInterface::QUERY_REQUEST;
+	class Request : public QueryInterface {
+	public:
+		Request() : QueryInterface() {}
+		Request(const char* json_str) : QueryInterface(json_str) {
+			_type = QueryInterface::QUERY_REQUEST;
 		}
 	};
 
-	struct Response : public QueryInterface {
-		Response() {
-			type = QueryInterface::QUERY_RESPONSE;
+	class Response : public QueryInterface {
+	public:
+		Response() : QueryInterface() {}
+		Response(const char* json_str) : QueryInterface(json_str) {
+			_type = QueryInterface::QUERY_RESPONSE;
 		}
 	};
 
