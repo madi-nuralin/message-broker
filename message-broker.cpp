@@ -47,12 +47,11 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const cha
 {
 	char const *messagebody;
 
-	MessageBroker::Response::Ptr response;
+	MessageBroker::Response::Ptr response = nullptr;
 	MessageBroker::Request request;
 	request.reqid = 1;
-	request.body = query;
+	request.parseBody(query);
 	messagebody = request.serialize();
-
 	amqp_bytes_t reply_to_queue;
 
 	/*
@@ -189,6 +188,12 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const cha
 					break;
 				}
 
+				char *json_str = strdup((char *)frame.payload.body_fragment.bytes);
+				json_str[frame.payload.body_fragment.len] = '\0';
+
+				response = std::make_shared<MessageBroker::Response>();
+				response->parse(json_str);
+
 				/* everything was fine, we can quit now because we received the reply */
 				break;
 			}
@@ -275,7 +280,10 @@ int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*c
 					MessageBroker::Response response;
 					request.parse((const char*)envelope.message.body.bytes);
 					response.reqid = request.reqid;
-					callback(request, response);
+					
+					if (!callback(request, response)) {
+						response.type = MessageBroker::QueryInterface::QUERY_ERROR;
+					}
 
 					/*
 						publish
@@ -295,12 +303,13 @@ int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*c
 		amqp_bytes_free(queuename);
 	});
 
-	t1.detach();
+	t1.join();
 }
 
-const char* MessageBroker::QueryInterface::serialize()
+char* MessageBroker::QueryInterface::serialize() const
 {
-	JsonBuilder *builder = json_builder_new();
+	g_autoptr(JsonBuilder) builder = json_builder_new();
+	
 	json_builder_begin_object(builder);
 
 	json_builder_set_member_name(builder, "reqid");
@@ -310,28 +319,52 @@ const char* MessageBroker::QueryInterface::serialize()
 	json_builder_add_string_value(builder, type.c_str());
 
 	json_builder_set_member_name(builder, "body");
-	json_builder_add_string_value(builder, body.c_str());
+	json_builder_add_value(builder, json_node_copy(body));
 
 	json_builder_end_object(builder);
 
-	JsonGenerator *gen = json_generator_new();
-	JsonNode *root = json_builder_get_root(builder);
+	g_autoptr(JsonNode) root = json_builder_get_root(builder);
+	g_autoptr(JsonGenerator) gen = json_generator_new();
 	json_generator_set_root(gen, root);
 	gchar *json_str = json_generator_to_data(gen, NULL);
 
-	json_node_free(root);
-	g_object_unref(gen);
-	g_object_unref(builder);
+	return (char *)json_str;
+}
 
-	return (const char *)json_str;
+char* MessageBroker::QueryInterface::serializeBody() const
+{
+	g_autoptr(JsonGenerator) gen = json_generator_new();
+	json_generator_set_root(gen, body);
+	gchar *json_str = json_generator_to_data(gen, NULL);
+
+	return (char*)json_str;
+}
+
+void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder)
+{
+	for (int i = 0; i < json_reader_count_members(reader); ++i)
+	{
+		json_reader_read_element(reader, i);
+		{
+			json_builder_set_member_name(builder, json_reader_get_member_name(reader));
+			if (json_reader_is_object(reader)) {
+				json_builder_begin_object(builder);
+				build_json_from_json_reader(reader, builder);
+				json_builder_end_object(builder);
+			} else {
+				json_builder_add_value(builder, json_node_copy(json_reader_get_value(reader)));
+			}
+		}
+		json_reader_end_element(reader);
+	}
 }
 
 bool MessageBroker::QueryInterface::parse(const char *json_str)
 {
-	JsonParser *parser = json_parser_new();
+	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, json_str, -1, NULL);
 
-	JsonReader *reader = json_reader_new(json_parser_get_root(parser));
+	g_autoptr(JsonReader) reader = json_reader_new(json_parser_get_root(parser));
 
 	json_reader_read_member(reader, "reqid");
 	reqid = json_reader_get_int_value(reader);
@@ -341,12 +374,34 @@ bool MessageBroker::QueryInterface::parse(const char *json_str)
 	type = json_reader_get_string_value(reader);
 	json_reader_end_member(reader);
 
+	g_autoptr(JsonBuilder) builder = json_builder_new();
+
 	json_reader_read_member(reader, "body");
-	body = json_reader_get_string_value(reader);
+	{
+		json_builder_begin_object(builder);
+		{
+			build_json_from_json_reader(reader, builder);
+		}
+		json_builder_end_object(builder);
+	}
 	json_reader_end_member(reader);
 
-	g_object_unref(reader);
-	g_object_unref(parser);
+	body = json_node_copy(json_builder_get_root(builder));
+
+	return true;
+}
+
+bool MessageBroker::QueryInterface::parseBody(const char* json_str)
+{
+	g_autoptr(JsonParser) parser = json_parser_new();
+	g_autoptr(GError) error{NULL};
+
+	if (!json_parser_load_from_data(parser, (gchar*)json_str, -1, &error)) {
+		g_warning("Cannot parse json_str: %s", error->message);
+		return false;
+	}
+
+	body = json_node_copy(json_parser_get_root(parser));
 
 	return true;
 }

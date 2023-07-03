@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 
+#include <json-glib/json-glib.h>
+
 #include <amqp.h>
 #include <amqp_tcp_socket.h>
 
@@ -25,10 +27,14 @@ public:
 		static const char * const QUERY_ERROR;
 
 		int reqid;
-		std::string type, body;
+		std::string type;
+		JsonNode *body;
 
-		const char* serialize();
-		bool parse(const char *json_str);
+		bool parse(const char* json_str);
+		bool parseBody(const char* json_str);
+
+		char* serialize() const;
+		char* serializeBody() const;
 	};
 
 	struct Request : public QueryInterface {
