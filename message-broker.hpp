@@ -30,6 +30,26 @@ public:
 		std::string type;
 		JsonNode *body;
 
+         //public:
+         //       QueryInterface(const char *json_str);
+         //       virtual ~QueryInterface();
+
+         //       int getId() const;
+         //       char* getType() const;
+         //       JsonNode* getBody() const;
+         //       bool setBody(const char *json_str) const;
+         //       bool setBody(const JsonNode *node) const;
+         //       char* toJsonString() const;
+         //       char* bodyToJsonString() const;
+                
+         //protected:
+         //       bool setType(const char *type);
+
+         //private:
+         //     int _reqid;
+	//	char *_type;
+	//	JsonNode *_body;
+
 		bool parse(const char* json_str);
 		bool parseBody(const char* json_str);
 
