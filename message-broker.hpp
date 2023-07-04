@@ -20,11 +20,6 @@ public:
 
 	class QueryInterface
 	{
-	protected:
-		int _id;
-		std::string _type;
-		JsonNode *_body;
-
 	public:
 		typedef std::shared_ptr<QueryInterface> Ptr;
 
@@ -32,50 +27,37 @@ public:
 		static const char * const QUERY_RESPONSE;
 		static const char * const QUERY_ERROR;
 
-	//public:
-	//       QueryInterface(const char *json_str);
-	//       virtual ~QueryInterface();
-
-	//       int getId() const;
-	//       char* getType() const;
-	//       JsonNode* getBody() const;
-	//       bool setBody(const char *json_str) const;
-	//       bool setBody(const JsonNode *node) const;
-	//       char* toJsonString() const;
-	//       char* bodyToJsonString() const;
-	    
-	//protected:
-	//       bool setType(const char *type);
-
 		QueryInterface();
-		QueryInterface(const char* json_str);
-		//~QueryInterface();
+		QueryInterface(const char *json_str);
+		//virtual ~QueryInterface();
 
-		int id() const {return _id;}
-		std::string type() const {return _type;}
-		JsonNode* body() const {return _body;}
-		bool set_type(const char* type);
-		bool set_body(const char* json_str);
-		bool set_body(const JsonNode* node);
-		char* json_str() const;
-		char* json_str_body() const;
+		char* getType() const { return m_type; }
+		JsonNode* getBody() const { return m_body; }
+		bool setBody(const char *json_str);
+		bool setBody(const JsonNode *node);
+		bool setType(const char *type);
+		char* serialize() const;
+		char* serializeBody() const;
 
+	protected:
+		char* m_type;
+		JsonNode* m_body;
 	};
 
 	class Request : public QueryInterface {
 	public:
-		Request() : QueryInterface() {}
-		Request(const char* json_str) : QueryInterface(json_str) {
-			_type = QueryInterface::QUERY_REQUEST;
+		Request() : QueryInterface() {
+			setType(QueryInterface::QUERY_REQUEST);
 		}
+		Request(const char* json_str) : QueryInterface(json_str) {}
 	};
 
 	class Response : public QueryInterface {
 	public:
-		Response() : QueryInterface() {}
-		Response(const char* json_str) : QueryInterface(json_str) {
-			_type = QueryInterface::QUERY_RESPONSE;
+		Response() : QueryInterface() {
+			setType(QueryInterface::QUERY_RESPONSE);
 		}
+		Response(const char* json_str) : QueryInterface(json_str) {}
 	};
 
 	class Queue
@@ -89,10 +71,10 @@ public:
 	MessageBroker::Response::Ptr send(
 		const char *exchange,
 		const char *routingkey,
-		const char *query
+		const char *message
 	);
 
-	int listen(
+	void listen(
 		const char *exchange,
 		const char *bindingkey,
 		bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response)

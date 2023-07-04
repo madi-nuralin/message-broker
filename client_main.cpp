@@ -9,14 +9,14 @@ int main(int argc, char const *argv[])
 	
 	auto resp = msgBroker.send("amq.direct", "logs", query1);
 	if (resp) {
-		if (resp->type() != MessageBroker::QueryInterface::QUERY_ERROR) {
-			fprintf(stderr, "Reponse: %s\n", resp->json_str());	
+		if (resp->getType() != MessageBroker::QueryInterface::QUERY_ERROR) {
+			fprintf(stderr, "Reponse: %s\n", resp->serialize());
 		}
 	}
 	
 	resp = msgBroker.send("amq.direct", "logs", query2);
 	if (resp) {
-		fprintf(stderr, "Reponse: %s\n", resp->json_str());
+		fprintf(stderr, "Reponse: %s\n", resp->serialize());
 	}
 	return 0;
 }

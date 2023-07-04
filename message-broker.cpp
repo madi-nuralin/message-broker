@@ -13,6 +13,21 @@ const char * const MessageBroker::QueryInterface::QUERY_REQUEST = "request";
 const char * const MessageBroker::QueryInterface::QUERY_RESPONSE = "response";
 const char * const MessageBroker::QueryInterface::QUERY_ERROR = "error";
 
+const char ALPHABET[] = {
+    "0123456789"
+    "abcdefgjhiklmnopqrstvwxyz"
+    "ABCDEFGJHIKLMNOPQRSTVWXYZ"
+};
+
+std::string generateReqId()
+{
+    std::string result;
+    for(std::size_t i = 0; i < 16; i++) {
+        result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
+    }
+    return result;
+}
+
 MessageBroker::MessageBroker(const char* hostname, int port)
 {
 	conn = amqp_new_connection();
@@ -48,9 +63,9 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const cha
 	MessageBroker::Response::Ptr response;
 	MessageBroker::Request request;
 
-	request.set_body(message);
+	request.setBody(message);
 
-	char const *messagebody = request.json_str();
+	char const *messagebody = request.serialize();
 	amqp_bytes_t reply_to_queue;
 
 	/*
@@ -88,7 +103,7 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const cha
 			fprintf(stderr, "Out of memory while copying queue name");
 			return nullptr;
 		}
-		props.correlation_id = amqp_cstring_bytes("1");
+		props.correlation_id = amqp_cstring_bytes(generateReqId().c_str());
 
 		/*
 			publish
@@ -201,7 +216,7 @@ MessageBroker::Response::Ptr MessageBroker::send(const char *exchange, const cha
 	return response;
 }
 
-int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response))
+void MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*callback)(const MessageBroker::Request &request, MessageBroker::Response &response))
 {
 	std::thread worker([this, exchange, bindingkey, callback]()
 	{
@@ -278,7 +293,7 @@ int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*c
 					MessageBroker::Response response;
 					
 					if (!callback(request, response)) {
-						response.set_type(MessageBroker::QueryInterface::QUERY_ERROR);
+						response.setType(MessageBroker::QueryInterface::QUERY_ERROR);
 					}
 
 					/*
@@ -286,7 +301,7 @@ int MessageBroker::listen(const char *exchange, const char *bindingkey, bool (*c
 					*/
 					die_on_error(amqp_basic_publish(conn, 1, amqp_empty_bytes,
 							amqp_cstring_bytes((char *)envelope.message.properties.reply_to.bytes), 0, 0,
-							&props, amqp_cstring_bytes((const char*)response.json_str())),
+							&props, amqp_cstring_bytes((const char*)response.serialize())),
 						"Publishing");
 
 					amqp_bytes_free(props.reply_to);
@@ -321,26 +336,21 @@ void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder)
 	}
 }
 
-MessageBroker::QueryInterface::QueryInterface() : _id(0)
+MessageBroker::QueryInterface::QueryInterface()
 {
 	//
 }
 
-MessageBroker::QueryInterface::QueryInterface(const char* json_str)
+MessageBroker::QueryInterface::QueryInterface(const char* json_str) 
+	: MessageBroker::QueryInterface()
 {
-	MessageBroker::QueryInterface();
-
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, json_str, -1, NULL);
 
 	g_autoptr(JsonReader) reader = json_reader_new(json_parser_get_root(parser));
 
-	json_reader_read_member(reader, "id");
-	_id = json_reader_get_int_value(reader);
-	json_reader_end_member(reader);
-
 	json_reader_read_member(reader, "type");
-	set_type(json_reader_get_string_value(reader));
+	setType(json_reader_get_string_value(reader));
 	json_reader_end_member(reader);
 
 	g_autoptr(JsonBuilder) builder = json_builder_new();
@@ -355,50 +365,60 @@ MessageBroker::QueryInterface::QueryInterface(const char* json_str)
 	}
 	json_reader_end_member(reader);
 
-	_body = json_node_copy(json_builder_get_root(builder));
+	setBody(json_builder_get_root(builder));
 }
 
-bool MessageBroker::QueryInterface::set_type(const char* type)
+bool MessageBroker::QueryInterface::setType(const char* type)
 {
-	_type = type;
+	const char *arr[] = {
+		MessageBroker::QueryInterface::QUERY_ERROR,
+		MessageBroker::QueryInterface::QUERY_RESPONSE,
+		MessageBroker::QueryInterface::QUERY_REQUEST
+	};
+
+	for (int i = 0; i < 3; ++i) {
+		if (strcmp(type, arr[i]) == 0) {
+			m_type = (char *)arr[i];
+			return true;
+		}
+	}
+
+	return false;
 }
 
-bool MessageBroker::QueryInterface::set_body(const char* json_str)
+bool MessageBroker::QueryInterface::setBody(const char* json_str)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
-	g_autoptr(GError) error{NULL};
+	g_autoptr(GError) error = nullptr;
 
 	if (!json_parser_load_from_data(parser, (gchar*)json_str, -1, &error)) {
 		g_warning("Cannot parse json_str: %s", error->message);
 		return false;
 	}
 
-	_body = json_node_copy(json_parser_get_root(parser));
+	setBody(json_parser_get_root(parser));
 
 	return true;
 }
 
-bool MessageBroker::QueryInterface::set_body(const JsonNode* json_node)
+bool MessageBroker::QueryInterface::setBody(const JsonNode* json_node)
 {
-	_body = json_node_copy((JsonNode*)json_node);
+	m_body = json_node_copy((JsonNode*)json_node);
 
 	return true;
 }
 
-char* MessageBroker::QueryInterface::json_str() const
+char* MessageBroker::QueryInterface::serialize() const
 {
 	g_autoptr(JsonBuilder) builder = json_builder_new();
 	
 	json_builder_begin_object(builder);
 
-	json_builder_set_member_name(builder, "id");
-	json_builder_add_int_value(builder, _id);
-
 	json_builder_set_member_name(builder, "type");
-	json_builder_add_string_value(builder, _type.c_str());
+	json_builder_add_string_value(builder, getType());
 
 	json_builder_set_member_name(builder, "body");
-	json_builder_add_value(builder, json_node_copy(_body));
+	json_builder_add_value(builder, json_node_copy(getBody()));
 
 	json_builder_end_object(builder);
 
@@ -409,10 +429,10 @@ char* MessageBroker::QueryInterface::json_str() const
 	return json_generator_to_data(gen, NULL);
 }
 
-char* MessageBroker::QueryInterface::json_str_body() const
+char* MessageBroker::QueryInterface::serializeBody() const
 {
 	g_autoptr(JsonGenerator) gen = json_generator_new();
-	json_generator_set_root(gen, _body);
+	json_generator_set_root(gen, getBody());
 
 	return json_generator_to_data(gen, NULL);
 }
