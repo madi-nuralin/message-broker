@@ -28,19 +28,19 @@ public:
 		static const char * const QUERY_ERROR;
 
 		QueryInterface();
-		QueryInterface(const char *json_str);
+		QueryInterface(const std::string& json_str);
 		//virtual ~QueryInterface();
 
-		char* getType() const { return m_type; }
+		std::string getType() const { return m_type; }
 		JsonNode* getBody() const { return m_body; }
-		bool setBody(const char *json_str);
+		bool setBody(const std::string& json_str);
 		bool setBody(const JsonNode *node);
-		bool setType(const char *type);
-		char* serialize() const;
-		char* serializeBody() const;
+		bool setType(const std::string& type);
+		std::string serialize() const;
+		std::string serializeBody() const;
 
 	protected:
-		char* m_type;
+		std::string m_reqid, m_type;
 		JsonNode* m_body;
 	};
 
@@ -49,7 +49,7 @@ public:
 		Request() : QueryInterface() {
 			setType(QueryInterface::QUERY_REQUEST);
 		}
-		Request(const char* json_str) : QueryInterface(json_str) {}
+		Request(const std::string& json_str) : QueryInterface(json_str) {}
 	};
 
 	class Response : public QueryInterface {
@@ -57,7 +57,7 @@ public:
 		Response() : QueryInterface() {
 			setType(QueryInterface::QUERY_RESPONSE);
 		}
-		Response(const char* json_str) : QueryInterface(json_str) {}
+		Response(const std::string& json_str) : QueryInterface(json_str) {}
 	};
 
 	class Queue
