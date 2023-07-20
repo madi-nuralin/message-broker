@@ -7,10 +7,8 @@ int main(int argc, char const *argv[])
 {
 	try {
 		MessageBroker broker("localhost", 5672);
-		MessageBroker::Response::Ptr resp;
 		
 		broker.publish("amq.direct", "users", query1);
-		broker.publish("amq.direct", "users", query1, resp);
 		broker.publish("amq.direct", "users", query1, [](const MessageBroker::Response& resp) {
 			if (resp.ok()) {
 				resp.serializeBody();
