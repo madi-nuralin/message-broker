@@ -10,16 +10,12 @@ int main(int argc, char const *argv[])
 		MessageBroker::Response::Ptr resp;
 		
 		broker.publish("amq.direct", "users", query1);
-		broker.publish("amq.direct", "users", query1, resp)
-			.via(queue)
-			.onReceive([&resp]() {
-				if (resp->ok()) {
-					response->serializeBody();
-				}
-			})
-			.onFailure([]() {
-				
-			});
+		broker.publish("amq.direct", "users", query1, resp);
+		broker.publish("amq.direct", "users", query1, [](const MessageBroker::Response& resp) {
+			if (resp.ok()) {
+				resp.serializeBody();
+			}
+		});
 	} catch (const std::runtime_error& e) {}
 	return 0;
 }
