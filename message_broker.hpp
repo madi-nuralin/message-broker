@@ -10,10 +10,10 @@ public:
 	MessageBroker(const std::string& hostname, const int port);
 	~MessageBroker();
 	
-	bool publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody);
-	Response::Ptr publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody, const int timeout);
-	bool subscribe(const std::string& exchange, void (*callback)(const Message& message));
-	bool subscribe(const std::string& exchange, bool (*callback)(const Request& request, Response& response));
+	void publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody);
+	void publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody, void (*callback)(const Response& response));
+	void subscribe(const std::string& bindingkey, void (*callback)(const Message& message));
+	void subscribe(const std::string& bindingkey, bool (*callback)(const Request& request, Response& response));
 
 	class Message
 	{
