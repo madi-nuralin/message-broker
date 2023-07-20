@@ -5,18 +5,21 @@ const char *query2 = "{\"query_name\":\"get-user-by-id\",\"query_data\":{\"id\":
 
 int main(int argc, char const *argv[])
 {
-	MessageBroker msgBroker("localhost", 5672);
-	
-	auto resp = msgBroker.send("amq.direct", "logs", query1);
-	if (resp) {
-		if (resp->getType() != MessageBroker::QueryInterface::QUERY_ERROR) {
-			fprintf(stderr, "Reponse: %s\n", resp->serialize());
-		}
-	}
-	
-	resp = msgBroker.send("amq.direct", "logs", query2);
-	if (resp) {
-		fprintf(stderr, "Reponse: %s\n", resp->serialize());
-	}
+	try {
+		MessageBroker broker("localhost", 5672);
+		MessageBroker::Response::Ptr resp;
+		
+		broker.publish("amq.direct", "users", query1);
+		broker.publish("amq.direct", "users", query1, resp)
+			.via(queue)
+			.onReceive([&resp]() {
+				if (resp->ok()) {
+					response->serializeBody();
+				}
+			})
+			.onFailure([]() {
+				
+			});
+	} catch (const std::runtime_error& e) {}
 	return 0;
 }
