@@ -67,13 +67,13 @@ public:
 	class Response : public Message
 	{
 	public:
-		Response(const Request &request, bool ok = true) : Message() {
-			m_type = ok ? "response" : "error";
+		Response(const Request &request) : Message() {
+			m_type = "response";
 			m_reqid = request.reqid();
 		}
 
-		Response(const Request &request, const std::string &body, bool ok = true) : Message(body) {
-			m_type = ok ? "response" : "error";
+		Response(const Request &request, const std::string &body) : Message(body) {
+			m_type = "response";
 			m_reqid = request.reqid();
 		}
 
