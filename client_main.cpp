@@ -1,19 +1,39 @@
-#include "message-broker.hpp"
+#include <iostream>
+#include "message_broker.hpp"
 
 const char *query1 = "{\"query_name\":\"get-user-by-id\",\"query_data\":{\"id\":1}}";
 const char *query2 = "{\"query_name\":\"get-user-by-id\",\"query_data\":{\"id\":3}}";
 
+
 int main(int argc, char const *argv[])
 {
-	try {
-		MessageBroker broker("localhost", 5672);
-		
-		broker.publish("amq.direct", "users", query1);
-		broker.publish("amq.direct", "users", query1, [](const MessageBroker::Response& resp) {
-			if (resp.ok()) {
-				resp.serializeBody();
-			}
-		});
-	} catch (const std::runtime_error& e) {}
-	return 0;
+	MessageBroker broker;
+
+	MessageBroker::Message m(query1);
+	std::cout << m.serialize() << std::endl;
+
+	MessageBroker::Request req(query1);
+	std::cout << req.serialize() << std::endl;
+	req.setBody("dswd");
+	std::cout << req.serialize() << std::endl;
+
+	MessageBroker::Response res(req);
+	std::cout << res.serialize() << std::endl;
+
+	//broker.publish("amq.direct", "logs", query1);
+	broker.publish(
+		MessageBroker::Exchange("logs", "direct"),
+		MessageBroker::Queue(""),
+		"logs",
+		"hello"
+	);
+
+	/*broker.subsribe(
+		MessageBroker::Exchange("logs", "direct"),
+		MessageBroker::Queue(""),
+		[](const VistaBroker::Request &request, VistaBroker::Reponse &response) {
+
+		}
+	)*/
+
 }
