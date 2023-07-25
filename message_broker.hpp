@@ -127,34 +127,6 @@ public:
 		bool passive, durable, auto_delete, exclusive;
 	};
 
-	struct Properties : public amqp_basic_properties_t
-	{
-	public:
-		/*std::string getContentType() const { return std::string((char *)content_type.bytes, content_type.len); }
-		std::string getContentEncoding() const { return std::string((char *)content_encoding.bytes, content_encoding.len); }
-		uint8_t getDeliveryMode() const { return delivery_mode; }
-		uint8_t getPriority() const { return priority; }
-		std::string getCorrelationId() const { return std::string((char *)correlation_id.bytes, correlation_id.len); }
-		std::string getReplyTo() const { return std::string((char *)reply_to.bytes, reply_to.len); }
-		std::string getExpiration() const { return std::string((char *)expiration.bytes, expiration.len); }
-		std::string getMessageId() const { return std::string((char *)message_id.bytes, message_id.len); }
-		uint64_t getTimestamp() const { return timestamp; }
-		std::string getType() const { return std::string((char *)type.bytes, type.len); }
-		std::string getUserId() const { return std::string((char *)user_id.bytes, user_id.len); }
-		std::string getAppId() const { return std::string((char *)app_id.bytes, app_id.len); }
-		std::string getClusterId() const { return std::string((char *)cluster_id.bytes, cluster_id.len); }
-
-		std::map<std::string, void*> m{
-			{"Content-Type", &content_type},
-			{"Content-Encoding", &content_encoding},
-			{"Delivery-Mode", &delivery_mode},
-			{"Priority", &priority},
-			{"Correlation-Id", &priority},
-		}
-
-		setProperty("Content-Type", "");*/
-	};
-
 	struct BasicMessage : public amqp_message_t
 	{
 		typedef std::shared_ptr<BasicMessage> Ptr;
@@ -168,9 +140,34 @@ public:
 			this->properties = properties;
 		}
 
-                //void setProperty(const std::string & property, const char *value);
-                //void setProperty(const std::string & property, uint8_t value);
-                //void setProperty(const std::string & property, uint64_t value);
+		static std::map<std::string, void*> m {
+			{"Content-Type", &content_type},
+			{"Content-Encoding", &content_encoding},
+			{"Delivery-Mode", &delivery_mode},
+			{"Priority", &priority},
+			{"Correlation-Id", &correlation_id},
+			{"Reply-To", &reply_to},
+{"Expiration", &expiration},
+{"Message-Id", &message_id},
+{"Reply-To", &reply_to},
+{"Timestamp", &timestamp},
+{"Type", &type},
+{"User-Id", &user_id},
+{"App-Id", &app_id},
+{"Cluster-Id", &cluster_id}
+		};
+
+		void setProperty(const std::string & property, const char *value) {
+			//std::reinterpret_cast<>
+		}
+
+		void setProperty(const std::string & property, uint8_t value) {
+
+		}
+
+		void setProperty(const std::string & property, uint64_t value) {
+
+		}
 	};
 
 	struct Envelope : public amqp_envelope_t
