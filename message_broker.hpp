@@ -135,11 +135,6 @@ public:
 			this->body = amqp_cstring_bytes(body.c_str());
 		}
 
-		BasicMessage(const std::string &body, const amqp_basic_properties_t &properties)
-			: BasicMessage(body) {
-			this->properties = properties;
-		}
-
 		std::map<std::string, void*> m {
 			{"Content-Type", &content_type},
 			{"Content-Encoding", &content_encoding},
@@ -162,11 +157,11 @@ public:
 		}
 
 		void setProperty(const std::string & property, uint8_t value) {
-			*reinterpret_cast<int*>(m[property]) = value;
+			*reinterpret_cast<uint8_t*>(m[property]) = value;
 		}
 
 		void setProperty(const std::string & property, uint64_t value) {
-			*reinterpret_cast<int*>(m[property]) = value;
+			*reinterpret_cast<uint64_t*>(m[property]) = value;
 		}
 	};
 
