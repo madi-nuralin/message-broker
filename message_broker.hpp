@@ -42,7 +42,7 @@ public:
 		std::string reqid() const { return m_reqid; }
 		bool setBody(const JsonNode *json_node, std::string *error = nullptr);
 		bool setBody(const std::string &body, std::string *error = nullptr);
-		std::string serialize() const;
+		virtual std::string serialize() const;
 		std::string serializeBody() const;
 
 	protected:
@@ -68,18 +68,24 @@ public:
 	{
 	public:
 		Response(const Request &request) : Message() {
-			m_type = "response";
 			m_reqid = request.reqid();
+			m_type = "response";
 		}
 
 		Response(const Request &request, const std::string &body) : Message(body) {
-			m_type = "response";
 			m_reqid = request.reqid();
+			m_type = "response";
 		}
 
 		~Response() {}
 
+		std::string serialize() const override;
+		void setReason(const std::string &reason);
+		std::string reason() const { return m_reason; }
 		bool ok() const { return m_type != "error"; }
+
+	protected:
+		std::string m_reason;
 
 	private:
 		Response();

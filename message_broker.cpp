@@ -222,21 +222,25 @@ bool MessageBroker::Message::setBody(const JsonNode* json_node, std::string *err
 	return true;
 }
 
-
-std::string MessageBroker::Message::serialize() const
+static std::string _serialize(const std::string &reqid, const std::string &type, const JsonNode *body, const std::string &reason = "")
 {
 	g_autoptr(JsonBuilder) builder = json_builder_new();
 	
 	json_builder_begin_object(builder);
 
 	json_builder_set_member_name(builder, "reqid");
-	json_builder_add_string_value(builder, m_reqid.c_str());
+	json_builder_add_string_value(builder, reqid.c_str());
 
 	json_builder_set_member_name(builder, "type");
-	json_builder_add_string_value(builder, m_type.c_str());
+	json_builder_add_string_value(builder, type.c_str());
 
 	json_builder_set_member_name(builder, "body");
-	json_builder_add_value(builder, json_node_copy(m_body));
+	json_builder_add_value(builder, json_node_copy((JsonNode*)body));
+
+	if (!reason.empty()) {
+		json_builder_set_member_name(builder, "reason");
+		json_builder_add_string_value(builder, reason.c_str());
+	}
 
 	json_builder_end_object(builder);
 
@@ -249,10 +253,26 @@ std::string MessageBroker::Message::serialize() const
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
+std::string MessageBroker::Message::serialize() const
+{
+	return _serialize(m_reqid, m_type, m_body);
+}
+
+std::string MessageBroker::Response::serialize() const
+{
+	return _serialize(m_reqid, m_type, m_body, m_reason);
+}
+
 std::string MessageBroker::Message::serializeBody() const
 {
 	g_autoptr(JsonGenerator) gen = json_generator_new();
 	json_generator_set_root(gen, m_body);
 
 	return std::string(json_generator_to_data(gen, NULL));
+}
+
+void MessageBroker::Response::setReason(const std::string &reason)
+{
+	m_type = reason.empty() ? "response" : "error";
+	m_reason = reason;
 }

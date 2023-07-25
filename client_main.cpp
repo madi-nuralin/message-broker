@@ -14,11 +14,13 @@ int main(int argc, char const *argv[])
 
 	MessageBroker::Request req(query1);
 	std::cout << req.serialize() << std::endl;
-	req.setBody("dswd");
-	std::cout << req.serialize() << std::endl;
 
 	MessageBroker::Response res(req);
 	std::cout << res.serialize() << std::endl;
+	res.setReason("failed to find user!");
+	if (!res.ok()) {
+		std::cout << res.reason() << std::endl;
+	}
 
 	//broker.publish("amq.direct", "logs", query1);
 	broker.publish(
