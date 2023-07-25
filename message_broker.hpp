@@ -167,6 +167,10 @@ public:
 			: BasicMessage(body) {
 			this->properties = properties;
 		}
+
+                //void setProperty(const std::string & property, const char *value);
+                //void setProperty(const std::string & property, uint8_t value);
+                //void setProperty(const std::string & property, uint64_t value);
 	};
 
 	struct Envelope : public amqp_envelope_t
