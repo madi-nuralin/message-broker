@@ -60,7 +60,7 @@ MessageBroker::Connection::~Connection()
 	die_on_error(amqp_destroy_connection(conn), "Ending connection");
 }
 
-void MessageBroker::Connection::declareExchange(const MessageBroker::Exchange &exchange)
+void MessageBroker::Connection::declareExchange(MessageBroker::Exchange &exchange)
 {
 	amqp_exchange_declare(conn, 1,
 		exchange.name.empty()
@@ -74,7 +74,7 @@ void MessageBroker::Connection::declareExchange(const MessageBroker::Exchange &e
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring exchange");
 }
 
-void MessageBroker::Connection::declareQueue(const MessageBroker::Queue &queue)
+void MessageBroker::Connection::declareQueue(MessageBroker::Queue &queue)
 {
 	amqp_queue_declare_ok_t *r = amqp_queue_declare(conn, 1, queue.name.empty()
 			? amqp_empty_bytes : amqp_cstring_bytes(queue.name.c_str()),
@@ -84,6 +84,7 @@ void MessageBroker::Connection::declareQueue(const MessageBroker::Queue &queue)
 	if (queuename.bytes == NULL) {
 		throw std::runtime_error("Out of memory while copying queue name");
 	}
+	queue.name = std::string((char *)queuename.bytes, (int)queuename.len);
 }
 
 void MessageBroker::Connection::bindQueue(const std::string &queuename,
@@ -110,10 +111,7 @@ void MessageBroker::Connection::basicPublish(const std::string &exchange,
                                              bool mandatory,
                                              bool immediate)
 {
-	amqp_basic_properties_t props;
-	props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
-	props.content_type = amqp_cstring_bytes("text/plain");
-	props.delivery_mode = 2; /* persistent delivery mode */
+	const char* _message = "Hello";
 	die_on_error(amqp_basic_publish(conn, 1,
 		exchange.empty()
 			? amqp_empty_bytes
@@ -121,8 +119,25 @@ void MessageBroker::Connection::basicPublish(const std::string &exchange,
 		routingkey.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(routingkey.c_str()),
-		mandatory, immediate, &props, amqp_cstring_bytes(message.body.c_str())),
+		mandatory, immediate, &message.properties, message.body),
 		"Publishing");
+}
+
+void MessageBroker::Connection::basicConsume(const std::string &queuename,
+                                             const std::string &consumer_tag,
+                                             bool no_local, bool no_ack,
+                                             bool exclusive,
+                                             uint16_t message_prefetch_count)
+{
+	amqp_basic_consume(conn, 1,
+		queuename.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(queuename.c_str()),
+		consumer_tag.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(consumer_tag.c_str()),
+		no_local, no_ack, exclusive, amqp_empty_table);
+	die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 }
 
 MessageBroker::MessageBroker(const std::string &host, int port,
@@ -155,22 +170,71 @@ MessageBroker::~MessageBroker()
 
 }
 
-void MessageBroker::publish(const MessageBroker::Exchange &exchange,
-                            const MessageBroker::Queue &queue,
+void MessageBroker::publish(MessageBroker::Exchange &exchange,
+                            MessageBroker::Queue &queue,
                             const std::string &routingkey,
-                            const std::string &message)
+                            const std::string &messagebody)
 {
-	//MessageBroker::Request request(message);
+	//MessageBroker::Message message(messagebody);
 
-	//request.message.;
-	//request.serialize();
-	//request.serializeBody();
-
+	//message.serialize();
+	//message.serializeBody();
+	
 	m_connection->declareExchange(exchange);
-	m_connection->declareQueue(queue);
-	m_connection->bindQueue(queue.name, exchange.name, routingkey);
-	m_connection->basicPublish(exchange.name, routingkey, BasicMessage(message), false, false);
 
+	m_connection->declareQueue(queue);
+
+	m_connection->bindQueue(queue.name, exchange.name, routingkey);
+	
+	m_connection->basicPublish(exchange.name, routingkey, BasicMessage(messagebody), false, false);
+
+}
+
+void MessageBroker::publish(const std::string &exchange,
+                            const std::string &routingkey,
+                            const std::string &messagebody)
+{
+	/*Properties props;
+	props.setContentType("application/json");
+	props.setDeliveryMode(2);/**/
+	Message message(messagebody);
+
+	amqp_basic_properties_t props;
+    props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
+    props.content_type = amqp_cstring_bytes("text/plain");
+    props.delivery_mode = 2; /* persistent delivery mode */
+
+	m_connection->basicPublish(exchange, routingkey, BasicMessage(message.serialize(), props));
+}
+
+void MessageBroker::subscribe(const std::string &exchange,
+	                          const std::string &bindingkey,
+                              void (*callback)(const Message& message))
+{
+	Queue queue("");
+
+	m_connection->declareQueue(queue);
+
+	m_connection->bindQueue(queue.name, exchange, bindingkey);
+
+	m_connection->basicConsume(queue.name, "", false, true, false);
+
+	for(;;) {
+		amqp_rpc_reply_t res;
+		amqp_envelope_t envelope;
+
+		amqp_maybe_release_buffers(m_connection->conn);
+
+		res = amqp_consume_message(m_connection->conn, &envelope, NULL, 0);
+
+		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+			break;
+		}
+
+		callback(Message(std::string((char *)envelope.message.body.bytes, envelope.message.body.len)));
+
+		amqp_destroy_envelope(&envelope);
+	}
 }
 
 MessageBroker::Message::Message()

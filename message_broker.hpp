@@ -116,7 +116,7 @@ public:
               bool passive = false,
               bool durable = false,
               bool exclusive = false,
-              bool auto_delete = false)
+              bool auto_delete = true)
 		: name(queue_name),
 		  passive(passive),
 		  durable(durable),
@@ -127,33 +127,51 @@ public:
 		bool passive, durable, auto_delete, exclusive;
 	};
 
-	struct BasicMessage
+	struct Properties : public amqp_basic_properties_t
 	{
-		enum delivery_mode_t {
-			dm_notset = 0,
-			dm_nonpersistent = 1,
-			dm_persistent = 2
-		};
+	public:
+		/*std::string getContentType() const { return std::string((char *)content_type.bytes, content_type.len); }
+		std::string getContentEncoding() const { return std::string((char *)content_encoding.bytes, content_encoding.len); }
+		uint8_t getDeliveryMode() const { return delivery_mode; }
+		uint8_t getPriority() const { return priority; }
+		std::string getCorrelationId() const { return std::string((char *)correlation_id.bytes, correlation_id.len); }
+		std::string getReplyTo() const { return std::string((char *)reply_to.bytes, reply_to.len); }
+		std::string getExpiration() const { return std::string((char *)expiration.bytes, expiration.len); }
+		std::string getMessageId() const { return std::string((char *)message_id.bytes, message_id.len); }
+		uint64_t getTimestamp() const { return timestamp; }
+		std::string getType() const { return std::string((char *)type.bytes, type.len); }
+		std::string getUserId() const { return std::string((char *)user_id.bytes, user_id.len); }
+		std::string getAppId() const { return std::string((char *)app_id.bytes, app_id.len); }
+		std::string getClusterId() const { return std::string((char *)cluster_id.bytes, cluster_id.len); }
 
-		BasicMessage(const std::string &body) : body(body) {}
+		std::map<std::string, void*> m{
+			{"Content-Type", &content_type},
+			{"Content-Encoding", &content_encoding},
+			{"Delivery-Mode", &delivery_mode},
+			{"Priority", &priority},
+			{"Correlation-Id", &priority},
+		}
 
-		std::string body;
-		struct {
-			std::string content_type;
-			std::string content_encoding;
-			delivery_mode_t delivery_mode;
-			uint8_t priority;
-			std::string correlation_id;
-			std::string reply_to;
-			std::string expiration;
-			std::string message_id;
-			uint64_t timestamp;
-			std::string type;
-			std::string user_id;
-			std::string app_id;
-			std::string cluster_id;
-			//Table header_table;
-		} properties;
+		setProperty("Content-Type", "");*/
+	};
+
+	struct BasicMessage : public amqp_message_t
+	{
+		typedef std::shared_ptr<BasicMessage> Ptr;
+
+		BasicMessage(const std::string &body) {
+			this->body = amqp_cstring_bytes(body.c_str());
+		}
+
+		BasicMessage(const std::string &body, const amqp_basic_properties_t &properties)
+			: BasicMessage(body) {
+			this->properties = properties;
+		}
+	};
+
+	struct Envelope : public amqp_envelope_t
+	{
+		typedef std::shared_ptr<Envelope> Ptr;
 	};
 
 	class Connection
@@ -184,9 +202,9 @@ public:
 		amqp_socket_t *socket = NULL;
 		amqp_connection_state_t conn;
 
-		void declareExchange(const Exchange &exchange);
+		void declareExchange(Exchange &exchange);
 		
-		void declareQueue(const Queue &queue);
+		void declareQueue(Queue &queue);
 		
 		void bindQueue(const std::string &queuename,
                        const std::string &exchange,
@@ -197,13 +215,18 @@ public:
                           const BasicMessage &message,
                           bool mandatory = false,
                           bool immediate = false);
-	
+
+		void basicConsume(const std::string &queuename,
+                          const std::string &consumer_tag = "",
+                          bool no_local = true, bool no_ack = true,
+                          bool exclusive = true,
+                          uint16_t message_prefetch_count = 1);
 	};
 	
-	void publish(const Exchange &exchange, const Queue &queue, const std::string &routingkey, const std::string &message);
-	//void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
+	void publish(Exchange &exchange, Queue &queue, const std::string &routingkey, const std::string &message);
+	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
 	//void publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody, void (*callback)(const Response& response));
-	//void subscribe(const std::string& bindingkey, void (*callback)(const Envelope& envelope));
+	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message& message));
 	//void subscribe(const std::string& bindingkey, bool (*callback)(const Request& request, Response& response));
 
 private:
