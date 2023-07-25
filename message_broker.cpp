@@ -198,7 +198,9 @@ void MessageBroker::publish(const std::string &exchange,
 	props.setContentType("application/json");
 	props.setDeliveryMode(2);/**/
 	Message message(messagebody);
-
+        //message.setProperty("Content-Type", "application/json);
+	//message.setProperty("Delivery-Mode", 2);
+	
 	amqp_basic_properties_t props;
     props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
     props.content_type = amqp_cstring_bytes("text/plain");
