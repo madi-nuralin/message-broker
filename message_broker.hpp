@@ -140,33 +140,33 @@ public:
 			this->properties = properties;
 		}
 
-		static std::map<std::string, void*> m {
+		std::map<std::string, void*> m {
 			{"Content-Type", &content_type},
 			{"Content-Encoding", &content_encoding},
 			{"Delivery-Mode", &delivery_mode},
 			{"Priority", &priority},
 			{"Correlation-Id", &correlation_id},
 			{"Reply-To", &reply_to},
-{"Expiration", &expiration},
-{"Message-Id", &message_id},
-{"Reply-To", &reply_to},
-{"Timestamp", &timestamp},
-{"Type", &type},
-{"User-Id", &user_id},
-{"App-Id", &app_id},
-{"Cluster-Id", &cluster_id}
+			{"Expiration", &expiration},
+			{"Message-Id", &message_id},
+			{"Reply-To", &reply_to},
+			{"Timestamp", &timestamp},
+			{"Type", &type},
+			{"User-Id", &user_id},
+			{"App-Id", &app_id},
+			{"Cluster-Id", &cluster_id}
 		};
 
 		void setProperty(const std::string & property, const char *value) {
-			//std::reinterpret_cast<>
+			*reinterpret_cast<amqp_bytes_t*>(m[property]) = amqp_cstring_bytes(value);
 		}
 
 		void setProperty(const std::string & property, uint8_t value) {
-
+			*reinterpret_cast<int*>(m[property]) = value;
 		}
 
 		void setProperty(const std::string & property, uint64_t value) {
-
+			*reinterpret_cast<int*>(m[property]) = value;
 		}
 	};
 
