@@ -196,8 +196,8 @@ void MessageBroker::publish(const std::string &exchange,
 {
 	Message message(messagebody);
 	BasicMessage bmsg(message.serialize());
-	bmsg.setProperty("Content-Type", "application/json);
-	bmsg.setProperty("Delivery-Mode", 2);
+	bmsg.setProperty("Content-Type", "application/json");
+	bmsg.setProperty("Delivery-Mode", (uint8_t)2);
 
 	m_connection->basicPublish(exchange, routingkey, bmsg);
 }

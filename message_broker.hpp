@@ -1,6 +1,7 @@
 #ifndef MESSAGE_BROKER_HPP
 #define MESSAGE_BROKER_HPP
 
+#include <map>
 #include <string>
 #include <memory>
 #include <amqp.h>
@@ -140,35 +141,35 @@ public:
 			void *ptr;
 		};
 
-		std::map<std::string, PropertyDescriptor> m {
-			{"Content-Type", PropertyDescriptor{AMQP_BASIC_CONTENT_TYPE_FLAG, &content_type}},
-			{"Content-Encoding", PropertyDescriptor{AMQP_BASIC_CONTENT_ENCODING_FLAG, &content_encoding}},
-			{"Delivery-Mode", PropertyDescriptor{AMQP_BASIC_DELIVERY_MODE_FLAG, &delivery_mode}},
-			{"Priority", PropertyDescriptor{AMQP_BASIC_PRIORITY_FLAG, &priority}},
-			{"Correlation-Id", PropertyDescriptor{AMQP_BASIC_CORRELATION_ID_FLAG, &correlation_id}},
-			{"Reply-To", PropertyDescriptor{AMQP_BASIC_RELY_TO_FLAG, &reply_to}},
-			{"Expiration", PropertyDescriptor{AMQP_BASIC_EXIRATION_FLAG, &expiration}},
-			{"Message-Id", PropertyDescriptor{AMQP_BASIC_MESSAGE_ID_FLAG, &message_id}},
-			{"Timestamp", PropertyDescriptor{AMQP_BASIC_TIMESTAMP_FLAG, &timestamp}},
-			{"Type", PropertyDescriptor{AMQP_BASIC_TYPE_FLAG, &type}},
-			{"User-Id", PropertyDescriptor{AMQP_BASIC_USER_ID_FLAG, &user_id}},
-			{"App-Id", PropertyDescriptor{AMQP_BASIC_APP_ID_FLAG, &app_id}},
-			{"Cluster-Id", PropertyDescriptor{AMQP_BASIC_CLUSTER_ID_FLAG, &cluster_id}}
+		std::map<std::string, PropertyDescriptor> schema {
+			{"Content-Type", PropertyDescriptor{AMQP_BASIC_CONTENT_TYPE_FLAG, &properties.content_type}},
+			{"Content-Encoding", PropertyDescriptor{AMQP_BASIC_CONTENT_ENCODING_FLAG, &properties.content_encoding}},
+			{"Delivery-Mode", PropertyDescriptor{AMQP_BASIC_DELIVERY_MODE_FLAG, &properties.delivery_mode}},
+			{"Priority", PropertyDescriptor{AMQP_BASIC_PRIORITY_FLAG, &properties.priority}},
+			{"Correlation-Id", PropertyDescriptor{AMQP_BASIC_CORRELATION_ID_FLAG, &properties.correlation_id}},
+			{"Reply-To", PropertyDescriptor{AMQP_BASIC_REPLY_TO_FLAG, &properties.reply_to}},
+			{"Expiration", PropertyDescriptor{AMQP_BASIC_EXPIRATION_FLAG, &properties.expiration}},
+			{"Message-Id", PropertyDescriptor{AMQP_BASIC_MESSAGE_ID_FLAG, &properties.message_id}},
+			{"Timestamp", PropertyDescriptor{AMQP_BASIC_TIMESTAMP_FLAG, &properties.timestamp}},
+			{"Type", PropertyDescriptor{AMQP_BASIC_TYPE_FLAG, &properties.type}},
+			{"User-Id", PropertyDescriptor{AMQP_BASIC_USER_ID_FLAG, &properties.user_id}},
+			{"App-Id", PropertyDescriptor{AMQP_BASIC_APP_ID_FLAG, &properties.app_id}},
+			{"Cluster-Id", PropertyDescriptor{AMQP_BASIC_CLUSTER_ID_FLAG, &properties.cluster_id}}
 		};
 
-		void setProperty(const std::string & property, const char *value) {
-			*reinterpret_cast<amqp_bytes_t*>(m[property].ptr) = amqp_cstring_bytes(value);
-			this->_flags |= m[property].flag;
+		void setProperty(const std::string & key, const char *value) {
+			*reinterpret_cast<amqp_bytes_t*>(schema[key].ptr) = amqp_cstring_bytes(value);
+			this->properties._flags |= schema[key].flag;
 		}
 
-		void setProperty(const std::string & property, uint8_t value) {
-			*reinterpret_cast<uint8_t*>(m[property].ptr) = value;
-			this->_flags |= m[property].flag;
+		void setProperty(const std::string & key, uint8_t value) {
+			*reinterpret_cast<uint8_t*>(schema[key].ptr) = value;
+			this->properties._flags |= schema[key].flag;
 		}
 
-		void setProperty(const std::string & property, uint64_t value) {
-			*reinterpret_cast<uint64_t*>(m[property].ptr) = value;
-			this->_flags |= m[property].flag;
+		void setProperty(const std::string & key, uint64_t value) {
+			*reinterpret_cast<uint64_t*>(schema[key].ptr) = value;
+			this->properties._flags |= schema[key].flag;
 		}
 	};
 
