@@ -68,6 +68,8 @@ public:
 	class Response : public Message
 	{
 	public:
+		Response(const std::string &str);
+
 		Response(const Request &request) : Message() {
 			m_reqid = request.reqid();
 			m_type = "response";
@@ -228,9 +230,9 @@ public:
 	void publish(Exchange &exchange, Queue &queue, const std::string &routingkey, const std::string &message);
 
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
-	void publish(const std::string &exchange, const std::string& routingkey, const std::string& messagebody, void (*callback)(const Response& response));
-	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message& message));
-	//void subscribe(const std::string& bindingkey, bool (*callback)(const Request& request, Response& response));
+	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
+	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message &message));
+	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 
 private:
 	std::string m_host;

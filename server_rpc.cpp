@@ -19,7 +19,6 @@ int main(int argc, char const *const *argv)
   amqp_socket_t *socket = NULL;
   amqp_connection_state_t conn;
   amqp_bytes_t queuename;
-  amqp_bytes_t reply_to_queue;
 
   if (argc < 5) {
     fprintf(stderr, "Usage: server_rpc host port exchange bindingkey\n");
@@ -68,20 +67,6 @@ int main(int argc, char const *const *argv)
                      amqp_empty_table);
   die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 
-  /*
-     create private reply_to queue
-  */
-  {
-    amqp_queue_declare_ok_t *r = amqp_queue_declare(
-        conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
-    die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring queue");
-    reply_to_queue = amqp_bytes_malloc_dup(r->queue);
-    if (reply_to_queue.bytes == NULL) {
-      fprintf(stderr, "Out of memory while copying queue name");
-      return 1;
-    }
-  }
-
   {
     for (;;) {
       amqp_rpc_reply_t res;
@@ -118,21 +103,20 @@ int main(int argc, char const *const *argv)
                        AMQP_BASIC_CORRELATION_ID_FLAG;
         props.content_type = amqp_cstring_bytes("text/plain");
         props.delivery_mode = 2; /* persistent delivery mode */
-        props.reply_to = amqp_bytes_malloc_dup(reply_to_queue);
+        props.reply_to = amqp_bytes_malloc_dup(envelope.message.properties.reply_to);
         if (props.reply_to.bytes == NULL) {
           fprintf(stderr, "Out of memory while copying queue name");
           return 1;
         }
-        props.correlation_id = amqp_cstring_bytes("1");
-        die_on_error(amqp_basic_publish(conn,
-                1,
-                //your code should publish to the default exchange (amqp_empty_bytes) 
-                amqp_empty_bytes,
-                // with a routing key that is specified in the reply_to header in the request message. 
-                amqp_cstring_bytes((char *)envelope.message.properties.reply_to.bytes),
-                0, 0, &props,
-                amqp_cstring_bytes((const char*)envelope.message.body.bytes)),
-                "Publishing");
+        
+        props.correlation_id = envelope.message.properties.correlation_id;
+
+        //your code should publish to the default exchange (amqp_empty_bytes)
+        // with a routing key that is specified in the reply_to header in the request message. 
+        die_on_error(amqp_basic_publish(conn, 1, amqp_empty_bytes,
+              amqp_cstring_bytes((char *)envelope.message.properties.reply_to.bytes), 0, 0,
+              &props, amqp_cstring_bytes((const char*)envelope.message.body.bytes)),
+            "Publishing");
 
         amqp_bytes_free(props.reply_to);
       }
