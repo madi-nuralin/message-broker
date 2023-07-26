@@ -18,7 +18,7 @@ int main(int argc, char const *argv[])
 	MessageBroker broker;
 
 	broker.subscribe("amq.direct", "test", [](const MessageBroker::Message &message) {
-		std::cout << message.serialize();
+		fprintf(stdout, "%s\n", message.serializeBody().c_str());
 	});
 
 	return 0;

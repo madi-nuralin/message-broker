@@ -9,10 +9,12 @@ int main(int argc, char const *argv[])
 {
 	MessageBroker broker;
 
-	/*MessageBroker::Message m(query1);
+	/*MessageBroker::Message m;
+	m.setBody(query1);
 	std::cout << m.serialize() << std::endl;
 
-	MessageBroker::Request req(query1);
+	MessageBroker::Request req;
+	req.setBody(query1);
 	std::cout << req.serialize() << std::endl;
 
 	MessageBroker::Response res(req);

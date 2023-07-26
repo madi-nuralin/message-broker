@@ -17,7 +17,7 @@ const char ALPHABET[] = {
     "ABCDEFGJHIKLMNOPQRSTVWXYZ"
 };
 
-std::string generateReqId()
+static std::string generateReqId()
 {
 	std::srand(std::time(nullptr));
     std::string result;
@@ -25,6 +25,26 @@ std::string generateReqId()
         result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
     }
     return result;
+}
+
+static void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder)
+{
+	for (int i = 0; i < json_reader_count_members(reader); ++i)
+	{
+		json_reader_read_element(reader, i);
+
+		json_builder_set_member_name(builder, json_reader_get_member_name(reader));
+
+		if (json_reader_is_object(reader)) {
+			json_builder_begin_object(builder);
+			build_json_from_json_reader(reader, builder);
+			json_builder_end_object(builder);
+		} else {
+			json_builder_add_value(builder, json_node_copy(json_reader_get_value(reader)));
+		}
+
+		json_reader_end_element(reader);
+	}
 }
 
 MessageBroker::Connection::Connection(const std::string &host, int port,
@@ -111,7 +131,6 @@ void MessageBroker::Connection::basicPublish(const std::string &exchange,
                                              bool mandatory,
                                              bool immediate)
 {
-	const char* _message = "Hello";
 	die_on_error(amqp_basic_publish(conn, 1,
 		exchange.empty()
 			? amqp_empty_bytes
@@ -186,7 +205,7 @@ void MessageBroker::publish(MessageBroker::Exchange &exchange,
 
 	m_connection->bindQueue(queue.name, exchange.name, routingkey);
 	
-	m_connection->basicPublish(exchange.name, routingkey, BasicMessage(messagebody), false, false);
+	//m_connection->basicPublish(exchange.name, routingkey, BasicMessage(messagebody), false, false);
 
 }
 
@@ -194,12 +213,35 @@ void MessageBroker::publish(const std::string &exchange,
                             const std::string &routingkey,
                             const std::string &messagebody)
 {
-	Message message(messagebody);
-	BasicMessage bmsg(message.serialize());
-	bmsg.setProperty("Content-Type", "application/json");
-	bmsg.setProperty("Delivery-Mode", (uint8_t)2);
+	Message message;
+	message.setBody(messagebody);
 
-	m_connection->basicPublish(exchange, routingkey, bmsg);
+	BasicMessage basicMessage(message.serialize());
+
+	basicMessage.setProperty("Content-Type", "application/json");
+	basicMessage.setProperty("Delivery-Mode", (uint8_t)2);
+
+	m_connection->basicPublish(exchange, routingkey, basicMessage);
+}
+
+void MessageBroker::publish(const std::string &exchange,
+                            const std::string &routingkey,
+                            const std::string &messagebody,
+                            void (*callback)(const Response& response))
+{
+	Queue queue("");
+
+	Request request;
+	request.setBody(messagebody);
+	
+	BasicMessage basicMessage(request.serialize());
+	
+	basicMessage.setProperty("Content-Type", "application/json");
+	basicMessage.setProperty("Delivery-Mode", (uint8_t)2);
+	basicMessage.setProperty("Correlation-Id", request.reqid().c_str());
+	basicMessage.setProperty("Reply-To", queue.name.c_str());
+
+	m_connection->basicPublish(exchange, routingkey, basicMessage);
 }
 
 void MessageBroker::subscribe(const std::string &exchange,
@@ -225,7 +267,7 @@ void MessageBroker::subscribe(const std::string &exchange,
 		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
 			break;
 		}
-
+		std::cout << std::string((char *)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
 		callback(Message(std::string((char *)envelope.message.body.bytes, envelope.message.body.len)));
 
 		amqp_destroy_envelope(&envelope);
@@ -246,11 +288,34 @@ MessageBroker::Message::~Message()
 }
 
 
-MessageBroker::Message::Message(const std::string &body)
+MessageBroker::Message::Message(const std::string &str)
 	: MessageBroker::Message::Message()
 {
+	g_autoptr(JsonParser) parser = json_parser_new();
+	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
+
+	g_autoptr(JsonReader) reader = json_reader_new(json_parser_get_root(parser));
+
+	json_reader_read_member(reader, "reqid");
+	m_reqid = json_reader_get_string_value(reader);
+	json_reader_end_member(reader);
+
+	json_reader_read_member(reader, "type");
+	m_type = json_reader_get_string_value(reader);
+	json_reader_end_member(reader);
+
+	g_autoptr(JsonBuilder) builder = json_builder_new();
+
+	json_reader_read_member(reader, "body");
+	json_builder_begin_object(builder);
+
+	build_json_from_json_reader(reader, builder);
+	
+	json_builder_end_object(builder);
+	json_reader_end_member(reader);
+
 	std::string error;
-	if (!this->setBody(body, &error)) {
+	if (!this->setBody(json_builder_get_root(builder), &error)) {
 		throw std::runtime_error(error);
 	}
 }

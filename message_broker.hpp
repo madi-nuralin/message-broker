@@ -36,7 +36,7 @@ public:
 	{
 	public:
 		Message();
-		Message(const std::string& body);
+		Message(const std::string& str);
 
 		~Message();
 
@@ -58,7 +58,7 @@ public:
 			m_type = "request";
 		}
 
-		Request(const std::string &body) : Message(body) {
+		Request(const std::string &str) : Message(str) {
 			m_type = "request";
 		}
 
@@ -69,11 +69,6 @@ public:
 	{
 	public:
 		Response(const Request &request) : Message() {
-			m_reqid = request.reqid();
-			m_type = "response";
-		}
-
-		Response(const Request &request, const std::string &body) : Message(body) {
 			m_reqid = request.reqid();
 			m_type = "response";
 		}
@@ -113,7 +108,7 @@ public:
 
 	struct Queue
 	{
-              Queue(const std::string &queue_name,
+		Queue(const std::string &queue_name,
               bool passive = false,
               bool durable = false,
               bool exclusive = false,
@@ -133,11 +128,14 @@ public:
 		typedef std::shared_ptr<BasicMessage> Ptr;
 
 		BasicMessage(const std::string &body) {
-			this->body = amqp_cstring_bytes(body.c_str());
+			this->properties._flags = 0;
+			this->body = amqp_bytes_malloc_dup(
+				amqp_cstring_bytes(body.c_str())
+			);
 		}
 
 		struct PropertyDescriptor {
-			uint16_t flag;
+			amqp_flags_t flag;
 			void *ptr;
 		};
 
@@ -228,8 +226,9 @@ public:
 	};
 	
 	void publish(Exchange &exchange, Queue &queue, const std::string &routingkey, const std::string &message);
+
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
-	//void publish(const std::string& exchange, const std::string& routingkey, const std::string& messagebody, void (*callback)(const Response& response));
+	void publish(const std::string &exchange, const std::string& routingkey, const std::string& messagebody, void (*callback)(const Response& response));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message& message));
 	//void subscribe(const std::string& bindingkey, bool (*callback)(const Request& request, Response& response));
 
