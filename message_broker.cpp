@@ -10,7 +10,8 @@
 
 #include "message_broker.hpp"
 #include "utils.h"
-
+#include <mutex>
+std::mutex mtx;  
 const char ALPHABET[] = {
     "0123456789"
     "abcdefgjhiklmnopqrstvwxyz"
@@ -129,7 +130,7 @@ void MessageBroker::Connection::bindQueue(const std::string &queuename,
 
 void MessageBroker::Connection::basicPublish(const std::string &exchange,
                                              const std::string &routingkey,
-                                             const BasicMessage &message,
+                                             const Message &message,
                                              bool mandatory,
                                              bool immediate)
 {
@@ -182,8 +183,6 @@ MessageBroker::MessageBroker(const std::string &host, int port,
 	m_password = password;
 	m_vhost = vhost;
 	m_frame_max = frame_max;
-
-	m_connection = std::make_shared<Connection>(host, port, username, password, vhost, frame_max);
 }
 
 MessageBroker::~MessageBroker()
@@ -191,12 +190,12 @@ MessageBroker::~MessageBroker()
 
 }
 
-void MessageBroker::publish(MessageBroker::Exchange &exchange,
+/*void MessageBroker::publish(MessageBroker::Exchange &exchange,
                             MessageBroker::Queue &queue,
                             const std::string &routingkey,
                             const std::string &messagebody)
 {
-	//MessageBroker::Message message(messagebody);
+	//MessageBroker::Statement message(messagebody);
 
 	//message.serialize();
 	//message.serializeBody();
@@ -207,23 +206,24 @@ void MessageBroker::publish(MessageBroker::Exchange &exchange,
 
 	m_connection->bindQueue(queue.name, exchange.name, routingkey);
 	
-	//m_connection->basicPublish(exchange.name, routingkey, BasicMessage(messagebody), false, false);
+	//m_connection->basicPublish(exchange.name, routingkey, Message(messagebody), false, false);
 
-}
+}*/
 
 void MessageBroker::publish(const std::string &exchange,
                             const std::string &routingkey,
                             const std::string &messagebody)
 {
-	Message message;
-	message.setBody(messagebody);
+	Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	BasicMessage basicMessage(message.serialize());
+	Statement statement;
+	statement.setBody(messagebody);
 
-	basicMessage.setProperty("Content-Type", "application/json");
-	basicMessage.setProperty("Delivery-Mode", (uint8_t)2);
+	Message message(statement.serialize());
+	message.setProperty("Content-Type", "application/json");
+	message.setProperty("Delivery-Mode", (uint8_t)2);
 
-	m_connection->basicPublish(exchange, routingkey, basicMessage);
+	connection.basicPublish(exchange, routingkey, message);
 }
 
 void MessageBroker::publish(const std::string &exchange,
@@ -231,203 +231,223 @@ void MessageBroker::publish(const std::string &exchange,
                             const std::string &messagebody,
                             void (*callback)(const Response& response))
 {
-	Queue queue("");
+	std::thread worker([&]() {
 
-	m_connection->declareQueue(queue);
+		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	Request request;
-	request.setBody(messagebody);
+		Queue queue;
 
-	BasicMessage basicMessage(request.serialize());
+		connection.declareQueue(queue);
 
-	basicMessage.setProperty("Content-Type", "application/json");
-	basicMessage.setProperty("Delivery-Mode", (uint8_t)2);
-	basicMessage.setProperty("Correlation-Id", request.reqid().c_str());
-	basicMessage.setProperty("Reply-To", queue.name.c_str());
+		Request request;
+		request.setBody(messagebody);
 
-	m_connection->basicPublish(exchange, routingkey, basicMessage);
+		Message message(request.serialize());
+		message.setProperty("Content-Type", "application/json");
+		message.setProperty("Delivery-Mode", (uint8_t)2);
+		message.setProperty("Correlation-Id", request.reqid().c_str());
+		message.setProperty("Reply-To", queue.name.c_str());
 
-	m_connection->basicConsume(queue.name, "", false, true, false);
+		connection.basicPublish(exchange, routingkey, message);
 
-	{
-		amqp_frame_t frame;
-		int result;
+		connection.basicConsume(queue.name, "", false, true, false);
 
-		amqp_basic_deliver_t *d;
-		amqp_basic_properties_t *p;
-		size_t body_target;
-		size_t body_received;
-		amqp_connection_state_t conn = m_connection->conn;
+		{
+			amqp_frame_t frame;
+			int result;
 
-		for(;;) {
-			amqp_maybe_release_buffers(conn);
-			result = amqp_simple_wait_frame(conn, &frame);
-			printf("Result: %d\n", result);
-			if (result < 0) {
-				break;
-			}
+			amqp_basic_deliver_t *d;
+			amqp_basic_properties_t *p;
+			size_t body_target;
+			size_t body_received;
+			amqp_connection_state_t conn = connection.conn;
 
-			printf("Frame type: %u channel: %u\n", frame.frame_type, frame.channel);
-			if (frame.frame_type != AMQP_FRAME_METHOD) {
-				continue;
-			}
+			for(;;) {
+				amqp_maybe_release_buffers(conn);
+				result = amqp_simple_wait_frame(conn, &frame);
+				printf("Result: %d\n", result);
+				if (result < 0) {
+					break;
+				}
 
-			printf("Method: %s\n", amqp_method_name(frame.payload.method.id));
-			if (frame.payload.method.id != AMQP_BASIC_DELIVER_METHOD) {
-				continue;
-			}
+				printf("Frame type: %u channel: %u\n", frame.frame_type, frame.channel);
+				if (frame.frame_type != AMQP_FRAME_METHOD) {
+					continue;
+				}
 
-			d =(amqp_basic_deliver_t *)frame.payload.method.decoded;
-			printf("Delivery: %u exchange: %.*s routingkey: %.*s\n",
-				(unsigned)d->delivery_tag,(int)d->exchange.len,
-				(char *)d->exchange.bytes,(int)d->routing_key.len,
-				(char *)d->routing_key.bytes);
+				printf("Method: %s\n", amqp_method_name(frame.payload.method.id));
+				if (frame.payload.method.id != AMQP_BASIC_DELIVER_METHOD) {
+					continue;
+				}
 
-			result = amqp_simple_wait_frame(conn, &frame);
-			if (result < 0) {
-				break;
-			}
+				d =(amqp_basic_deliver_t *)frame.payload.method.decoded;
+				printf("Delivery: %u exchange: %.*s routingkey: %.*s\n",
+					(unsigned)d->delivery_tag,(int)d->exchange.len,
+					(char *)d->exchange.bytes,(int)d->routing_key.len,
+					(char *)d->routing_key.bytes);
 
-			if (frame.frame_type != AMQP_FRAME_HEADER) {
-				fprintf(stderr, "Expected header!");
-				abort();
-			}
-			p = (amqp_basic_properties_t *)frame.payload.properties.decoded;
-			if (p->_flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
-				printf("Content-type: %.*s\n",(int)p->content_type.len,
-					(char *)p->content_type.bytes);
-			}
-			printf("----\n");
-
-			body_target =(size_t)frame.payload.properties.body_size;
-			body_received = 0;
-
-			while(body_received < body_target) {
 				result = amqp_simple_wait_frame(conn, &frame);
 				if (result < 0) {
 					break;
 				}
 
-				if (frame.frame_type != AMQP_FRAME_BODY) {
-					fprintf(stderr, "Expected body!");
+				if (frame.frame_type != AMQP_FRAME_HEADER) {
+					fprintf(stderr, "Expected header!");
 					abort();
 				}
+				p = (amqp_basic_properties_t *)frame.payload.properties.decoded;
+				if (p->_flags & AMQP_BASIC_CONTENT_TYPE_FLAG) {
+					printf("Content-type: %.*s\n",(int)p->content_type.len,
+						(char *)p->content_type.bytes);
+				}
+				printf("----\n");
 
-				body_received += frame.payload.body_fragment.len;
-				assert(body_received <= body_target);
+				body_target =(size_t)frame.payload.properties.body_size;
+				body_received = 0;
 
-				amqp_dump(frame.payload.body_fragment.bytes,
-				    frame.payload.body_fragment.len);
-		    }
+				while(body_received < body_target) {
+					result = amqp_simple_wait_frame(conn, &frame);
+					if (result < 0) {
+						break;
+					}
 
-			if (body_received != body_target) {
-				/* Can only happen when amqp_simple_wait_frame returns <= 0 */
-				/* We break here to close the connection */
+					if (frame.frame_type != AMQP_FRAME_BODY) {
+						fprintf(stderr, "Expected body!");
+						abort();
+					}
+
+					body_received += frame.payload.body_fragment.len;
+					assert(body_received <= body_target);
+
+					amqp_dump(frame.payload.body_fragment.bytes,
+					    frame.payload.body_fragment.len);
+			    }
+
+				if (body_received != body_target) {
+					/* Can only happen when amqp_simple_wait_frame returns <= 0 */
+					/* We break here to close the connection */
+					break;
+				}
+
+				callback(Response(std::string((char *)frame.payload.body_fragment.bytes, frame.payload.body_fragment.len)));
+
+				/* everything was fine, we can quit now because we received the reply */
 				break;
 			}
-
-			callback(Response(std::string((char *)frame.payload.body_fragment.bytes, frame.payload.body_fragment.len)));
-
-			/* everything was fine, we can quit now because we received the reply */
-			break;
 		}
-	}
+	});
+
+	worker.detach();
 }
 
 void MessageBroker::subscribe(const std::string &exchange,
 	                          const std::string &bindingkey,
-                              void (*callback)(const Message& message))
+                              void (*callback)(const Statement& statement))
 {
-	Queue queue("");
+	std::thread worker([&]() {
 
-	m_connection->declareQueue(queue);
+		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	m_connection->bindQueue(queue.name, exchange, bindingkey);
+		Queue queue;
 
-	m_connection->basicConsume(queue.name, "", false, true, false);
+		connection.declareQueue(queue);
 
-	for(;;) {
-		amqp_rpc_reply_t res;
-		amqp_envelope_t envelope;
+		connection.bindQueue(queue.name, exchange, bindingkey);
 
-		amqp_maybe_release_buffers(m_connection->conn);
+		connection.basicConsume(queue.name, "", false, true, false);
 
-		res = amqp_consume_message(m_connection->conn, &envelope, NULL, 0);
+		for(;;) {
+			amqp_rpc_reply_t res;
+			amqp_envelope_t envelope;
 
-		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-			die_on_amqp_error(res, "error reply from a RPC method");
+			amqp_maybe_release_buffers(connection.conn);
+
+			res = amqp_consume_message(connection.conn, &envelope, NULL, 0);
+
+			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+				die_on_amqp_error(res, "error reply from a RPC method");
+			}
+
+			callback(Statement(std::string((char *)envelope.message.body.bytes, envelope.message.body.len)));
+
+			amqp_destroy_envelope(&envelope);
 		}
+	});
 
-		callback(Message(std::string((char *)envelope.message.body.bytes, envelope.message.body.len)));
-
-		amqp_destroy_envelope(&envelope);
-	}
+	worker.detach();
 }
 
 void MessageBroker::subscribe(const std::string &exchange,
                               const std::string &bindingkey,
                               void (*callback)(const Request &request, Response &response))
 {
-	Queue queue("");
+	std::thread worker([&]() {
 
-	m_connection->declareQueue(queue);
+		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	m_connection->bindQueue(queue.name, exchange, bindingkey);
+		Queue queue;
 
-	m_connection->basicConsume(queue.name, "", false, true, false);
+		connection.declareQueue(queue);
 
-	for(;;) {
-		auto conn = m_connection->conn;
-		amqp_rpc_reply_t res;
-		amqp_envelope_t envelope;
+		connection.bindQueue(queue.name, exchange, bindingkey);
 
-		amqp_maybe_release_buffers(conn);
+		connection.basicConsume(queue.name, "", false, true, false);
 
-		res = amqp_consume_message(conn, &envelope, NULL, 0);
+		for(;;) {
+			auto conn = connection.conn;
+			amqp_rpc_reply_t res;
+			amqp_envelope_t envelope;
 
-		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-			die_on_amqp_error(res, "error reply from a RPC method");
+			amqp_maybe_release_buffers(conn);
+
+			res = amqp_consume_message(conn, &envelope, NULL, 0);
+
+			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+				die_on_amqp_error(res, "error reply from a RPC method");
+			}
+
+			/*
+				send reply
+			*/
+
+			{
+				Request request(std::string((char *)envelope.message.body.bytes, envelope.message.body.len));
+				Response response(request);
+
+				callback(request, response);
+
+				std::string reply_to((char *)envelope.message.properties.reply_to.bytes, (int)envelope.message.properties.reply_to.len);
+				std::string correlation_id((char *)envelope.message.properties.correlation_id.bytes, (int)envelope.message.properties.correlation_id.len);
+
+				Message message(response.serialize());
+				message.setProperty("Content-Type", "application/json");
+				message.setProperty("Delivery-Mode", (uint8_t)2);
+				message.setProperty("Reply-To", reply_to.c_str());
+				message.setProperty("Correlation-Id", correlation_id.c_str());
+
+				//if (message.properties.reply_to.bytes == NULL) {
+				//	throw std::runtime_error("Out of memory while copying queue name");
+				//}
+
+				connection.basicPublish("", reply_to, message);
+
+				//amqp_bytes_free(message.properties.reply_to);
+			}
+
+			amqp_destroy_envelope(&envelope);
 		}
+	});
 
-		/*
-			send reply
-		*/
-
-		{
-			Request request(std::string((char *)envelope.message.body.bytes, envelope.message.body.len));
-			Response response(request);
-
-			callback(request, response);
-
-			std::string reply_to((char *)envelope.message.properties.reply_to.bytes, (int)envelope.message.properties.reply_to.len);
-			std::string correlation_id((char *)envelope.message.properties.correlation_id.bytes, (int)envelope.message.properties.correlation_id.len);
-
-			BasicMessage basicMessage(response.serialize());
-			basicMessage.setProperty("Content-Type", "application/json");
-			basicMessage.setProperty("Delivery-Mode", (uint8_t)2);
-			basicMessage.setProperty("Reply-To", reply_to.c_str());
-			basicMessage.setProperty("Correlation-Id", correlation_id.c_str());
-
-			//if (basicMessage.properties.reply_to.bytes == NULL) {
-			//	throw std::runtime_error("Out of memory while copying queue name");
-			//}
-
-			m_connection->basicPublish("", reply_to, basicMessage);
-
-			//amqp_bytes_free(basicMessage.properties.reply_to);
-		}
-
-		amqp_destroy_envelope(&envelope);
-	}
+	worker.detach();
 }
 
-MessageBroker::Message::Message()
+MessageBroker::Statement::Statement()
 	: m_reqid(generateReqId()), m_type("message")
 {
 	m_body = json_node_new(JSON_NODE_NULL);
 }
 
-MessageBroker::Message::~Message()
+MessageBroker::Statement::~Statement()
 {
 	if (m_body) {
 		json_node_free(m_body);
@@ -435,8 +455,8 @@ MessageBroker::Message::~Message()
 }
 
 
-MessageBroker::Message::Message(const std::string &str)
-	: MessageBroker::Message::Message()
+MessageBroker::Statement::Statement(const std::string &str)
+	: MessageBroker::Statement::Statement()
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -468,7 +488,7 @@ MessageBroker::Message::Message(const std::string &str)
 }
 
 MessageBroker::Response::Response(const std::string &str)
-	: MessageBroker::Message::Message(str)
+	: MessageBroker::Statement::Statement(str)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -480,7 +500,7 @@ MessageBroker::Response::Response(const std::string &str)
 	json_reader_end_member(reader);
 }
 
-bool MessageBroker::Message::setBody(const std::string &body, std::string *error)
+bool MessageBroker::Statement::setBody(const std::string &body, std::string *error)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	g_autoptr(GError) gerror = nullptr;
@@ -495,7 +515,7 @@ bool MessageBroker::Message::setBody(const std::string &body, std::string *error
 	return this->setBody(json_parser_get_root(parser), error);
 }
 
-bool MessageBroker::Message::setBody(const JsonNode* json_node, std::string *error)
+bool MessageBroker::Statement::setBody(const JsonNode* json_node, std::string *error)
 {
 	if (m_body) {
 		json_node_free(m_body);
@@ -537,7 +557,7 @@ static std::string _serialize(const std::string &reqid, const std::string &type,
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
-std::string MessageBroker::Message::serialize() const
+std::string MessageBroker::Statement::serialize() const
 {
 	return _serialize(m_reqid, m_type, m_body);
 }
@@ -547,7 +567,7 @@ std::string MessageBroker::Response::serialize() const
 	return _serialize(m_reqid, m_type, m_body, m_reason);
 }
 
-std::string MessageBroker::Message::serializeBody() const
+std::string MessageBroker::Statement::serializeBody() const
 {
 	g_autoptr(JsonGenerator) gen = json_generator_new();
 	json_generator_set_root(gen, m_body);

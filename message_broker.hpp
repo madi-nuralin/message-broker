@@ -32,13 +32,13 @@ public:
 	 */
 	~MessageBroker();
 
-	class Message
+	class Statement
 	{
 	public:
-		Message();
-		Message(const std::string& str);
+		Statement();
+		Statement(const std::string& str);
 
-		~Message();
+		~Statement();
 
 		std::string reqid() const { return m_reqid; }
 		bool setBody(const JsonNode *json_node, std::string *error = nullptr);
@@ -51,26 +51,26 @@ public:
 		JsonNode *m_body;
 	};
 
-	class Request : public Message
+	class Request : public Statement
 	{
 	public:
-		Request() : Message() {
+		Request() : Statement() {
 			m_type = "request";
 		}
 
-		Request(const std::string &str) : Message(str) {
+		Request(const std::string &str) : Statement(str) {
 			m_type = "request";
 		}
 
 		~Request() {}
 	};
 
-	class Response : public Message
+	class Response : public Statement
 	{
 	public:
 		Response(const std::string &str);
 
-		Response(const Request &request) : Message() {
+		Response(const Request &request) : Statement() {
 			m_reqid = request.reqid();
 			m_type = "response";
 		}
@@ -110,7 +110,7 @@ public:
 
 	struct Queue
 	{
-		Queue(const std::string &queue_name,
+		Queue(const std::string &queue_name = "",
               bool passive = false,
               bool durable = false,
               bool exclusive = false,
@@ -125,11 +125,11 @@ public:
 		bool passive, durable, auto_delete, exclusive;
 	};
 
-	struct BasicMessage : public amqp_message_t
+	struct Message : public amqp_message_t
 	{
-		typedef std::shared_ptr<BasicMessage> Ptr;
+		typedef std::shared_ptr<Message> Ptr;
 
-		BasicMessage(const std::string &body) {
+		Message(const std::string &body) {
 			this->properties._flags = 0;
 			this->body = amqp_bytes_malloc_dup(
 				amqp_cstring_bytes(body.c_str())
@@ -181,8 +181,6 @@ public:
 	class Connection
 	{
 	public:
-		typedef std::shared_ptr<Connection> Ptr;
-
 		/**
 		 * @brief      Constructs a new instance.
 		 *
@@ -216,7 +214,7 @@ public:
 
 		void basicPublish(const std::string &exchange,
                           const std::string &routingkey,
-                          const BasicMessage &message,
+                          const Message &message,
                           bool mandatory = false,
                           bool immediate = false);
 
@@ -227,11 +225,11 @@ public:
                           uint16_t message_prefetch_count = 1);
 	};
 	
-	void publish(Exchange &exchange, Queue &queue, const std::string &routingkey, const std::string &message);
+	//void publish(Exchange &exchange, Queue &queue, const std::string &routingkey, const std::string &message);
 
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
-	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message &message));
+	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Statement &statement));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 
 private:
@@ -241,8 +239,6 @@ private:
 	std::string m_vhost;
 	int m_port;
 	int m_frame_max;
-
-	Connection::Ptr m_connection;
 };
 
 #endif //MESSAGE_BROKER_HPP
