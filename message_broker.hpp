@@ -20,13 +20,13 @@ public:
     class Request,
     class Response;
 
-//	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message);
+	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message);
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
-//	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message, void (*callback)(const Response &response));
+	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message, void (*callback)(const Response &response));
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
-//	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, const std::string &message);
+	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, void (*callback)(const Statement &statement));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Statement &statement));
-//	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, const std::string &message);
+	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 
 private:
