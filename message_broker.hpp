@@ -19,14 +19,64 @@ public:
     class Statement,
     class Request,
     class Response;
+    class Statement {
+    public:
+	Statement();
+	Statement(const std::string& str);
+	virtual ~Statement();
 
-	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message);
+	std::string reqid() const { return m_reqid; }
+	bool setBody(const JsonNode *json_node, std::string *error = nullptr);
+	bool setBody(const std::string &body, std::string *error = nullptr);
+	virtual std::string serialize() const;
+	std::string serializeBody() const;
+
+	protected:
+		std::string m_reqid, m_type;
+		JsonNode *m_body;
+	};
+
+	class Request : public Statement
+	{
+	public:
+		Request() : Statement() {
+			m_type = "request";
+		}
+		Request(const std::string &str) : Statement(str) {
+			m_type = "request";
+		}
+		~Request();
+	};
+
+	class Response : public Statement
+	{
+	public:
+		Response(const std::string &str);
+		Response(const Request &request) : Statement() {
+			m_reqid = request.reqid();
+			m_type = "response";
+		}
+		~Response();
+
+		std::string serialize() const override;
+		void setReason(const std::string &reason);
+		std::string reason() const { return m_reason; }
+		bool ok() const { return m_type != "error"; }
+
+	protected:
+		std::string m_reason;
+
+	private:
+		Response();
+	};
+
+	void publish(amqp::exchange &exchange, amqp::queue &queue, const std::string &routingkey, const std::string &message);
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
-	void publish(amq::exchange &exchange, amq::queue &queue, const std::string &routingkey, const std::string &message, void (*callback)(const Response &response));
+	void publish(amqp::exchange &exchange, amqp::queue &queue, const std::string &routingkey, const std::string &message, void (*callback)(const Response &response));
 	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
-	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, void (*callback)(const Statement &statement));
+	void subscribe(amqp::exchange &exchange, amqp::queue &queue, const std::string &bindingkey, void (*callback)(const Statement &statement));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Statement &statement));
-	void subscribe(amq::exchange &exchange, amq::queue &queue, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
+	void subscribe(amqp::exchange &exchange, amqp::queue &queue, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 
 private:
@@ -38,7 +88,7 @@ private:
 	int m_frame_max;
 };
 
-namespace amq {
+namespace amqp {
 class envelope : public amqp_envelope_t {
 
 };
@@ -112,8 +162,8 @@ public:
 	amqp_socket_t *socket = NULL;
 	amqp_connection_state_t conn;
 
-	void declare_exchange(amq::exchange &exchange);
-	void declare_queue(amq::queue &queue);
+	void declare_exchange(amqp::exchange &exchange);
+	void declare_queue(amqp::queue &queue);
 	void bind_queue(const std::string &queuename, const std::string &exchange, const std::string &routingkey);
 	void basic_publish(const std::string &exchange, const std::string &routingkey, const amq::message &message, bool mandatory = false, bool immediate = false);
 	void basic_consume(const std::string &queuename, const std::string &consumer_tag = "", bool no_local = true, bool no_ack = true, bool exclusive = true, uint16_t message_prefetch_count = 1);
