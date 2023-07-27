@@ -13,8 +13,14 @@ int main(int argc, char const *argv[])
 {
 	VistaMessageBroker broker;
 
-#if 0
-	broker.publish("amq.direct", "test", message);
+#if 1
+	//broker.publish("amq.direct", "test", message);
+	broker.publish({
+		.exchange    = {.name = ""},
+		.queue       = {.name = "hello", .auto_delete = false},
+		.queue_bind  = false,
+		.routing_key = "hello"
+	}, message);
 #else
 	broker.publish("amq.direct", "test", query1, [](const auto &response) {
 		if (response.ok()) {

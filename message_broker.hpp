@@ -82,9 +82,9 @@ public:
 	struct Configuration {
 		Exchange exchange;
 		Queue queue;
-		union {
-			std::string routingkey, bindingkey;
-		};
+		bool queue_bind;
+		std::string routing_key;
+		std::string binding_key;
 	};
 
 	class Message : public amqp_message_t
@@ -187,7 +187,7 @@ public:
 		Envelope consumeMessage(int timeout = 0, int flags = 0);
 	};
 	
-	//void publish(Configuration configration, const std::string &message);
+	void publish(const Configuration configration, const std::string &message);
 	//void publish(Configuration configration, const std::string &messagebody, void (*callback)(const Response &response));
 	//void subscribe(Configuration configration, void (*callback)(const Statement &statement));
 	//void subscribe(Configuration configration, void (*callback)(const Request &request, Response &response));

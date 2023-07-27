@@ -204,12 +204,11 @@ VistaMessageBroker::~VistaMessageBroker()
 	//
 }
 
-/*void VistaMessageBroker::publish(Configuration configuration,
-	const std::string &routingkey, const std::string &messagebody)
+void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody)
 {
 	Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	Statement statement
+	Statement statement;
 	statement.setBody(messagebody);
 
 	Message message(statement.serialize());
@@ -218,12 +217,15 @@ VistaMessageBroker::~VistaMessageBroker()
 
 	auto exchange = configuration.exchange;
 	auto queue = configuration.queue;
+	auto routing_key = configuration.routing_key;
 	
-	connection->declareExchange(exchange);
-	connection->declareQueue(queue);
-	connection->bindQueue(queue.name, exchange.name, routingkey);
-	connection->basicPublish(exchange.name, routingkey, message);
-}*/
+	//connection.declareExchange(exchange);
+	connection.declareQueue(queue);
+	if (configuration.queue_bind) {
+		connection.bindQueue(queue.name, exchange.name, routing_key);
+	}
+	connection.basicPublish(exchange.name, routing_key, message);
+}
 
 void VistaMessageBroker::publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody)
 {
