@@ -15,30 +15,33 @@ std::vector<User> users({
 	{2, "Keith Williams"}
 });
 
+using namespace gammasoft;
+
 int main(int argc, char const *argv[])
 {
-	MessageBroker broker;
+	VistaMessageBroker broker;
 
+#if 0
 	broker.subscribe("amq.direct", "test", [](const auto &statement) {
-		fprintf(stdout, "%s\n", statement.serializeBody().c_str());
+		std::cout << statement.serializeBody() << std::endl;
 	});
 
 	broker.subscribe("amq.direct", "test", [](const auto &statement) {
-		fprintf(stdout, "%s\n", statement.serializeBody().c_str());
+		std::cout << statement.serializeBody() << std::endl;
 	});
-
-	/*broker.subscribe("amq.direct", "test", [](const auto &request, auto &response) {
-		printf("request: %s\n", request.serialize().c_str());
+#else
+	broker.subscribe("amq.direct", "test",[](const auto &request, auto &response) {
+		printf("1 request: %s\n", request.serialize().c_str());
 		response.setReason("user not found");
-		printf("response: %s\n", response.serialize().c_str());
+		printf("1 response: %s\n", response.serialize().c_str());
 	});
 
 	broker.subscribe("amq.direct", "test2", [](const auto &request, auto &response) {
-		printf("request: %s\n", request.serialize().c_str());
+		printf("2 request: %s\n", request.serialize().c_str());
 		response.setReason("user not found");
-		printf("response: %s\n", response.serialize().c_str());
-	});*/
-
+		printf("2 response: %s\n", response.serialize().c_str());
+	});
+#endif
 	while(1){}
 
 	return 0;

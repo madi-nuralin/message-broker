@@ -3,6 +3,7 @@
 #include <thread>
 #include <stdexcept>
 #include <iostream>
+#include <sstream>
 
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
@@ -10,8 +11,9 @@
 
 #include "message_broker.hpp"
 #include "utils.h"
-#include <mutex>
-std::mutex mtx;  
+
+namespace gammasoft {
+
 const char ALPHABET[] = {
     "0123456789"
     "abcdefgjhiklmnopqrstvwxyz"
@@ -20,20 +22,17 @@ const char ALPHABET[] = {
 
 static std::string generateReqId()
 {
-	std::srand(std::time(nullptr));
-    std::string result;
-    for(std::size_t i = 0; i < 16; i++) {
-        result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
-    }
-    return result;
+	std::string result;
+	for(std::size_t i = 0; i < 16; i++) {
+		result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
+	}
+	return result;
 }
 
 static void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder)
 {
-	for (int i = 0; i < json_reader_count_members(reader); ++i)
-	{
+	for (int i = 0; i < json_reader_count_members(reader); ++i) {
 		json_reader_read_element(reader, i);
-
 		json_builder_set_member_name(builder, json_reader_get_member_name(reader));
 
 		if (json_reader_is_object(reader)) {
@@ -48,10 +47,11 @@ static void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder
 	}
 }
 
-MessageBroker::Connection::Connection(const std::string &host, int port,
-                                      const std::string &username,
-                                      const std::string &password,
-                                      const std::string &vhost, int frame_max)
+VistaMessageBroker::Connection::Connection(
+	const std::string &host, int port,
+	const std::string &username,
+	const std::string &password,
+	const std::string &vhost, int frame_max)
 {
 	conn = amqp_new_connection();
 
@@ -68,22 +68,26 @@ MessageBroker::Connection::Connection(const std::string &host, int port,
 	die_on_amqp_error(amqp_login(conn, vhost.c_str(), 0, frame_max, 0, AMQP_SASL_METHOD_PLAIN,
 			username.c_str(), password.c_str()),
 		"Logging in");
-	amqp_channel_open(conn, 1);
+	std::stringstream ss;
+	ss << std::this_thread::get_id();
+	uint64_t id = std::stoull(ss.str());
+
+	amqp_channel_open(conn, channel=id);
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Opening channel");
 }
 
-MessageBroker::Connection::~Connection()
+VistaMessageBroker::Connection::~Connection()
 {
-	die_on_amqp_error(amqp_channel_close(conn, 1, AMQP_REPLY_SUCCESS),
+	die_on_amqp_error(amqp_channel_close(conn, channel, AMQP_REPLY_SUCCESS),
 			"Closing channel");
 	die_on_amqp_error(amqp_connection_close(conn, AMQP_REPLY_SUCCESS),
 			"Closing connection");
 	die_on_error(amqp_destroy_connection(conn), "Ending connection");
 }
 
-void MessageBroker::Connection::declareExchange(MessageBroker::Exchange &exchange)
+void VistaMessageBroker::Connection::declareExchange(VistaMessageBroker::Exchange &exchange)
 {
-	amqp_exchange_declare(conn, 1,
+	amqp_exchange_declare(conn, channel,
 		exchange.name.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(exchange.name.c_str()),
@@ -95,9 +99,9 @@ void MessageBroker::Connection::declareExchange(MessageBroker::Exchange &exchang
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Declaring exchange");
 }
 
-void MessageBroker::Connection::declareQueue(MessageBroker::Queue &queue)
+void VistaMessageBroker::Connection::declareQueue(VistaMessageBroker::Queue &queue)
 {
-	amqp_queue_declare_ok_t *r = amqp_queue_declare(conn, 1,
+	amqp_queue_declare_ok_t *r = amqp_queue_declare(conn, channel,
 		queue.name.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(queue.name.c_str()),
@@ -110,11 +114,10 @@ void MessageBroker::Connection::declareQueue(MessageBroker::Queue &queue)
 	queue.name = std::string((char *)queuename.bytes, (int)queuename.len);
 }
 
-void MessageBroker::Connection::bindQueue(const std::string &queuename,
-                                          const std::string &exchange,
-                                          const std::string &routingkey)
+void VistaMessageBroker::Connection::bindQueue(const std::string &queuename,
+	const std::string &exchange, const std::string &routingkey)
 {
-	amqp_queue_bind(conn, 1, 
+	amqp_queue_bind(conn, channel, 
 		queuename.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(queuename.c_str()),
@@ -128,13 +131,10 @@ void MessageBroker::Connection::bindQueue(const std::string &queuename,
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Binding queue");
 }
 
-void MessageBroker::Connection::basicPublish(const std::string &exchange,
-                                             const std::string &routingkey,
-                                             const Message &message,
-                                             bool mandatory,
-                                             bool immediate)
+void VistaMessageBroker::Connection::basicPublish(const std::string &exchange,
+	const std::string &routingkey, const Message &message, bool mandatory, bool immediate)
 {
-	die_on_error(amqp_basic_publish(conn, 1,
+	die_on_error(amqp_basic_publish(conn, channel,
 		exchange.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(exchange.c_str()),
@@ -145,13 +145,10 @@ void MessageBroker::Connection::basicPublish(const std::string &exchange,
 		"Publishing");
 }
 
-void MessageBroker::Connection::basicConsume(const std::string &queuename,
-                                             const std::string &consumer_tag,
-                                             bool no_local, bool no_ack,
-                                             bool exclusive,
-                                             uint16_t message_prefetch_count)
+void VistaMessageBroker::Connection::basicConsume(const std::string &queuename, const std::string &consumer_tag,
+	bool no_local, bool no_ack, bool exclusive, uint16_t message_prefetch_count)
 {
-	amqp_basic_consume(conn, 1,
+	amqp_basic_consume(conn, channel,
 		queuename.empty()
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(queuename.c_str()),
@@ -162,11 +159,28 @@ void MessageBroker::Connection::basicConsume(const std::string &queuename,
 	die_on_amqp_error(amqp_get_rpc_reply(conn), "Consuming");
 }
 
-MessageBroker::MessageBroker(const std::string &host, int port,
-                             const std::string &username,
-                             const std::string &password,
-                             const std::string &vhost, int frame_max)
+VistaMessageBroker::Envelope
+	VistaMessageBroker::Connection::consumeMessage(int timeout, int flags)
 {
+	amqp_rpc_reply_t res;
+	amqp_envelope_t envelope;
+
+	amqp_maybe_release_buffers(conn);
+
+	res = amqp_consume_message(conn, &envelope, NULL, 0);
+
+	if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+		die_on_amqp_error(res, "error reply from a RPC method");
+	}
+
+	return Envelope(envelope);
+}
+
+VistaMessageBroker::VistaMessageBroker(const std::string &host, int port,
+	const std::string &username, const std::string &password, const std::string &vhost, int frame_max)
+{
+	std::srand(std::time(NULL));
+
 	if (host.empty()) {
 		throw std::runtime_error("host is not specified, it is required");
 	}
@@ -185,34 +199,33 @@ MessageBroker::MessageBroker(const std::string &host, int port,
 	m_frame_max = frame_max;
 }
 
-MessageBroker::~MessageBroker()
+VistaMessageBroker::~VistaMessageBroker()
 {
-
+	//
 }
 
-/*void MessageBroker::publish(MessageBroker::Exchange &exchange,
-                            MessageBroker::Queue &queue,
-                            const std::string &routingkey,
-                            const std::string &messagebody)
+/*void VistaMessageBroker::publish(Configuration configuration,
+	const std::string &routingkey, const std::string &messagebody)
 {
-	//MessageBroker::Statement message(messagebody);
+	Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
-	//message.serialize();
-	//message.serializeBody();
+	Statement statement
+	statement.setBody(messagebody);
+
+	Message message(statement.serialize());
+	message.setProperty("Content-Type", "application/json");
+	message.setProperty("Delivery-Mode", (uint8_t)2);	
+
+	auto exchange = configuration.exchange;
+	auto queue = configuration.queue;
 	
-	m_connection->declareExchange(exchange);
-
-	m_connection->declareQueue(queue);
-
-	m_connection->bindQueue(queue.name, exchange.name, routingkey);
-	
-	//m_connection->basicPublish(exchange.name, routingkey, Message(messagebody), false, false);
-
+	connection->declareExchange(exchange);
+	connection->declareQueue(queue);
+	connection->bindQueue(queue.name, exchange.name, routingkey);
+	connection->basicPublish(exchange.name, routingkey, message);
 }*/
 
-void MessageBroker::publish(const std::string &exchange,
-                            const std::string &routingkey,
-                            const std::string &messagebody)
+void VistaMessageBroker::publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody)
 {
 	Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
@@ -226,17 +239,13 @@ void MessageBroker::publish(const std::string &exchange,
 	connection.basicPublish(exchange, routingkey, message);
 }
 
-void MessageBroker::publish(const std::string &exchange,
-                            const std::string &routingkey,
-                            const std::string &messagebody,
-                            void (*callback)(const Response& response))
+void VistaMessageBroker::publish(const std::string &exchange, const std::string &routingkey,
+	const std::string &messagebody, void (*callback)(const Response& response))
 {
-	std::thread worker([&]() {
-
+	std::thread worker([&]()
+	{
 		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
-
 		Queue queue;
-
 		connection.declareQueue(queue);
 
 		Request request;
@@ -249,7 +258,6 @@ void MessageBroker::publish(const std::string &exchange,
 		message.setProperty("Reply-To", queue.name.c_str());
 
 		connection.basicPublish(exchange, routingkey, message);
-
 		connection.basicConsume(queue.name, "", false, true, false);
 
 		{
@@ -340,71 +348,42 @@ void MessageBroker::publish(const std::string &exchange,
 	worker.detach();
 }
 
-void MessageBroker::subscribe(const std::string &exchange,
-	                          const std::string &bindingkey,
-                              void (*callback)(const Statement& statement))
+void VistaMessageBroker::subscribe(const std::string &exchange,
+	const std::string &bindingkey, void (*callback)(const Statement& statement))
 {
-	std::thread worker([&]() {
-
+	std::thread worker([&]()
+	{
 		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
-
 		Queue queue;
 
 		connection.declareQueue(queue);
-
 		connection.bindQueue(queue.name, exchange, bindingkey);
-
 		connection.basicConsume(queue.name, "", false, true, false);
 
 		for(;;) {
-			amqp_rpc_reply_t res;
-			amqp_envelope_t envelope;
-
-			amqp_maybe_release_buffers(connection.conn);
-
-			res = amqp_consume_message(connection.conn, &envelope, NULL, 0);
-
-			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-				die_on_amqp_error(res, "error reply from a RPC method");
-			}
+			auto envelope = connection.consumeMessage();
 
 			callback(Statement(std::string((char *)envelope.message.body.bytes, envelope.message.body.len)));
-
-			amqp_destroy_envelope(&envelope);
 		}
 	});
 
 	worker.detach();
 }
 
-void MessageBroker::subscribe(const std::string &exchange,
-                              const std::string &bindingkey,
-                              void (*callback)(const Request &request, Response &response))
+void VistaMessageBroker::subscribe(const std::string &exchange,
+	const std::string &bindingkey, void (*callback)(const Request &request, Response &response))
 {
-	std::thread worker([&]() {
-
+	std::thread worker([&]()
+	{
 		Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
-
 		Queue queue;
 
 		connection.declareQueue(queue);
-
 		connection.bindQueue(queue.name, exchange, bindingkey);
-
 		connection.basicConsume(queue.name, "", false, true, false);
 
 		for(;;) {
-			auto conn = connection.conn;
-			amqp_rpc_reply_t res;
-			amqp_envelope_t envelope;
-
-			amqp_maybe_release_buffers(conn);
-
-			res = amqp_consume_message(conn, &envelope, NULL, 0);
-
-			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-				die_on_amqp_error(res, "error reply from a RPC method");
-			}
+			auto envelope = connection.consumeMessage();
 
 			/*
 				send reply
@@ -425,29 +404,21 @@ void MessageBroker::subscribe(const std::string &exchange,
 				message.setProperty("Reply-To", reply_to.c_str());
 				message.setProperty("Correlation-Id", correlation_id.c_str());
 
-				//if (message.properties.reply_to.bytes == NULL) {
-				//	throw std::runtime_error("Out of memory while copying queue name");
-				//}
-
 				connection.basicPublish("", reply_to, message);
-
-				//amqp_bytes_free(message.properties.reply_to);
 			}
-
-			amqp_destroy_envelope(&envelope);
 		}
 	});
 
 	worker.detach();
 }
 
-MessageBroker::Statement::Statement()
+VistaMessageBroker::Statement::Statement()
 	: m_reqid(generateReqId()), m_type("message")
 {
 	m_body = json_node_new(JSON_NODE_NULL);
 }
 
-MessageBroker::Statement::~Statement()
+VistaMessageBroker::Statement::~Statement()
 {
 	if (m_body) {
 		json_node_free(m_body);
@@ -455,8 +426,8 @@ MessageBroker::Statement::~Statement()
 }
 
 
-MessageBroker::Statement::Statement(const std::string &str)
-	: MessageBroker::Statement::Statement()
+VistaMessageBroker::Statement::Statement(const std::string &str)
+	: VistaMessageBroker::Statement::Statement()
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -487,8 +458,8 @@ MessageBroker::Statement::Statement(const std::string &str)
 	}
 }
 
-MessageBroker::Response::Response(const std::string &str)
-	: MessageBroker::Statement::Statement(str)
+VistaMessageBroker::Response::Response(const std::string &str)
+	: VistaMessageBroker::Statement::Statement(str)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -500,7 +471,7 @@ MessageBroker::Response::Response(const std::string &str)
 	json_reader_end_member(reader);
 }
 
-bool MessageBroker::Statement::setBody(const std::string &body, std::string *error)
+bool VistaMessageBroker::Statement::setBody(const std::string &body, std::string *error)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	g_autoptr(GError) gerror = nullptr;
@@ -515,7 +486,7 @@ bool MessageBroker::Statement::setBody(const std::string &body, std::string *err
 	return this->setBody(json_parser_get_root(parser), error);
 }
 
-bool MessageBroker::Statement::setBody(const JsonNode* json_node, std::string *error)
+bool VistaMessageBroker::Statement::setBody(const JsonNode* json_node, std::string *error)
 {
 	if (m_body) {
 		json_node_free(m_body);
@@ -557,17 +528,17 @@ static std::string _serialize(const std::string &reqid, const std::string &type,
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
-std::string MessageBroker::Statement::serialize() const
+std::string VistaMessageBroker::Statement::serialize() const
 {
 	return _serialize(m_reqid, m_type, m_body);
 }
 
-std::string MessageBroker::Response::serialize() const
+std::string VistaMessageBroker::Response::serialize() const
 {
 	return _serialize(m_reqid, m_type, m_body, m_reason);
 }
 
-std::string MessageBroker::Statement::serializeBody() const
+std::string VistaMessageBroker::Statement::serializeBody() const
 {
 	g_autoptr(JsonGenerator) gen = json_generator_new();
 	json_generator_set_root(gen, m_body);
@@ -575,8 +546,10 @@ std::string MessageBroker::Statement::serializeBody() const
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
-void MessageBroker::Response::setReason(const std::string &reason)
+void VistaMessageBroker::Response::setReason(const std::string &reason)
 {
 	m_type = reason.empty() ? "response" : "error";
 	m_reason = reason;
 }
+
+} // end namespace gammasoft
