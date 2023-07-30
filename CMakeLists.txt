@@ -15,5 +15,5 @@ link_libraries(${RBMQ_LIBRARIES} ${GLIB_LIBRARIES} ${JSON_GLIB_LIBRARIES})
 
 add_executable(client_rpc client_rpc.cpp utils.cpp)
 add_executable(server_rpc server_rpc.cpp utils.cpp)
-add_executable(client client_main.cpp message_broker.cpp utils.cpp)
-add_executable(server server_main.cpp message_broker.cpp utils.cpp)
+add_executable(client client_main.cpp message_broker.cpp utils.cpp common.cpp)
+add_executable(server server_main.cpp message_broker.cpp utils.cpp common.cpp)
