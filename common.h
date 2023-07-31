@@ -17,7 +17,9 @@ public:
 	}
 
 	~Message() {
-		//amqp_destroy_message(this);
+		// Frees memory associated with a amqp_message_t
+		// allocated in amqp_read_message
+		amqp_destroy_message(this);
 	}
 
 	void setProperty(const std::string & key, const char *value) {
@@ -58,8 +60,11 @@ protected:
 	};
 };
 
-struct Envelope : public amqp_envelope_t {
+class Envelope : public amqp_envelope_t {
+public:
 	Envelope(const amqp_envelope_t &envelope) {
+		// a shallow copy of amqp_envelope_t
+		this->channel = envelope.channel;
 		this->message = envelope.message;
 		this->routing_key = envelope.routing_key;
 		this->exchange = envelope.exchange;
@@ -70,26 +75,8 @@ struct Envelope : public amqp_envelope_t {
 		// envelope a pointer to a amqp_envelope_t object. Caller
 		// should call #amqp_destroy_envelope() when it is done using
 		// the fields in the envelope object.
-		//amqp_destroy_envelope(this);
+		amqp_destroy_envelope(this);
 	}
-};
-
-class Connection;
-class Channel {
-public:
-	Channel() {}
-	Channel(Connection *connection);
-	~Channel();
-
-	std::string setup_queue(const std::string &queue_name, const std::string &exchange = "", const std::string &routing_key = "",
-		bool passive = false, bool durable = false, bool auto_delete = false, bool exclusive = false);
-
-	void consume(const std::string &queue_name, const std::string &consumer_tag = "",
-		bool no_local = false, bool no_ack = true, bool exclusive = false);
-
-	Connection *connection;
-	amqp_channel_t id;
-	std::queue<amqp_envelope_t> envelopes;
 };
 
 class Connection {
@@ -103,6 +90,20 @@ public:
 
 	amqp_socket_t *socket = NULL;
 	amqp_connection_state_t state;
+	std::map<amqp_channel_t, class Channel*> channels;
 	std::mutex mutex;
-	std::map<amqp_channel_t, Channel*> channels;
+};
+
+class Channel {
+public:
+	Channel(Connection *connection);
+	~Channel();
+
+	std::string setup_queue(const std::string &queue_name, const std::string &exchange = "", const std::string &routing_key = "", bool passive = false, bool durable = false, bool auto_delete = false, bool exclusive = false);
+	void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
+	void consume(const std::string &queue_name, void (*callback)(const Envelope &envelope), const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+
+	amqp_channel_t id;
+	Connection *connection;
+	std::queue<amqp_envelope_t> envelopes;
 };

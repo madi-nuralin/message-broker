@@ -9,14 +9,20 @@ int main(int argc, char const *argv[])
 
 	std::thread t1([&](){
 		Channel channel(&connection);
-		auto queue = channel.setup_queue("lions");
-		channel.consume("lions");
+		channel.setup_queue("lions");
+		channel.consume("lions", [](const auto& envelope) {
+			std::cout << (int)envelope.channel << " ";
+			std::cout << std::string((char*)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
+		});
 	});
 
 	std::thread t2([&](){
 		Channel channel(&connection);
 		channel.setup_queue("cats");
-		channel.consume("cats");
+		channel.consume("cats", [](const auto& envelope) {
+			std::cout << (int)envelope.channel << " ";
+			std::cout << std::string((char*)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
+		});
 	});
 
 	t1.join();

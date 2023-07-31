@@ -4,6 +4,7 @@
 #include <thread>
 #include <rabbitmq-c/tcp_socket.h>
 
+// serial auto-increment for channel id
 static uint16_t serial = 0;
 
 Connection::Connection(
@@ -72,9 +73,10 @@ Connection::~Connection() {
 
 Channel::Channel(Connection *connection) {
 	std::unique_lock<std::mutex> lock(connection->mutex);
-	this->connection = connection;
 	this->id = ++serial;
-	connection->channels[id] = this;
+	this->connection = connection;
+	this->connection->channels[id] = this;
+
 	amqp_channel_open(connection->state, id);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state),
 			"Opening channel");
@@ -90,18 +92,14 @@ std::string Channel::setup_queue(const std::string &queue_name, const std::strin
 {
 	std::unique_lock<std::mutex> lock(connection->mutex);
 	amqp_queue_declare_ok_t *r = amqp_queue_declare(
-		connection->state,
-		id,
-		queue_name.empty() ? amqp_empty_bytes : amqp_cstring_bytes(queue_name.c_str()),
-		passive,
-		durable,
-		exclusive,
-		auto_delete,
-		amqp_empty_table
+		connection->state, id, queue_name.empty() 
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(queue_name.c_str()),
+		passive, durable, exclusive, auto_delete, amqp_empty_table
 	);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Declaring queue");
-/*
-	amqp_queue_bind(
+
+	/*amqp_queue_bind(
 		connection->state,
 		id,
 		queue_name.empty()
@@ -114,28 +112,36 @@ std::string Channel::setup_queue(const std::string &queue_name, const std::strin
 			? amqp_empty_bytes
 			: amqp_cstring_bytes(routing_key.c_str()),
 		amqp_empty_table);
-	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Binding queue");
-*/
+	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Binding queue");*/
 	return std::string((char*)r->queue.bytes, r->queue.len);
 }
 
-void Channel::consume(const std::string &queue_name, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
+void Channel::publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory, bool immediate)
+{
+	std::unique_lock<std::mutex> lock(connection->mutex);
+	die_on_error(amqp_basic_publish(connection->state, id,
+		exchange.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(exchange.c_str()),
+		routing_key.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(routing_key.c_str()),
+		mandatory, immediate, &message.properties, message.body),
+		"Publishing");
+}
+
+void Channel::consume(const std::string &queue_name, void (*callback)(const Envelope &envelope), const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 {
 	{
 		std::unique_lock<std::mutex> lock(connection->mutex);
-		amqp_basic_consume(
-			connection->state,
-			id,
+		amqp_basic_consume(connection->state, id,
 			queue_name.empty()
 				? amqp_empty_bytes
 				: amqp_cstring_bytes(queue_name.c_str()),
 			consumer_tag.empty()
 				? amqp_empty_bytes
 				: amqp_cstring_bytes(consumer_tag.c_str()),
-			no_local,
-			no_ack=1,
-			exclusive,
-			amqp_empty_table
+			no_local, no_ack, exclusive, amqp_empty_table
 		);
 		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Consuming");
 	}
@@ -144,10 +150,9 @@ void Channel::consume(const std::string &queue_name, const std::string &consumer
 	
 	for (;;) {
 		if (!envelopes.empty()) {
-			Envelope envelope = envelopes.front();
+			auto envelope = Envelope(envelopes.front());
 			envelopes.pop();
-/**/			std::cout << (int)id << " ";
-/**/			std::cout << std::string((char*)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
+			callback(envelope);
 		}
 	}
 }
