@@ -1,4 +1,5 @@
-#pragma once
+#ifndef  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__
+#define  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__
 
 #include <string>
 #include <map>
@@ -102,8 +103,12 @@ public:
 	std::string setup_queue(const std::string &queue_name, const std::string &exchange = "", const std::string &routing_key = "", bool passive = false, bool durable = false, bool auto_delete = false, bool exclusive = false);
 	void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
 	void consume(const std::string &queue_name, void (*callback)(const Envelope &envelope), const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+	int ack(uint64_t delivery_tag, bool multiple = false);
+	int nack(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
 	amqp_channel_t id;
 	Connection *connection;
 	std::queue<amqp_envelope_t> envelopes;
 };
+
+#endif // __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__

@@ -22,6 +22,10 @@ Connection::Connection(
 		throw std::runtime_error("port is not valid, it must be a positive number");
 	}
 
+	/*
+		establish a channel that is used to connect RabbitMQ server
+	*/
+
 	state = amqp_new_connection();
 
 	socket = amqp_tcp_socket_new(state);
@@ -91,58 +95,30 @@ Channel::~Channel() {
 std::string Channel::setup_queue(const std::string &queue_name, const std::string &exchange, const std::string &routing_key, bool passive, bool durable, bool auto_delete, bool exclusive)
 {
 	std::unique_lock<std::mutex> lock(connection->mutex);
-	amqp_queue_declare_ok_t *r = amqp_queue_declare(
-		connection->state, id, queue_name.empty() 
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(queue_name.c_str()),
-		passive, durable, exclusive, auto_delete, amqp_empty_table
-	);
+	amqp_queue_declare_ok_t *r = amqp_queue_declare(connection->state, id, queue_name.empty() ? amqp_empty_bytes : amqp_cstring_bytes(queue_name.c_str()), passive, durable, exclusive, auto_delete, amqp_empty_table);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Declaring queue");
 
-	/*amqp_queue_bind(
-		connection->state,
-		id,
-		queue_name.empty()
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(queue_name.c_str()),
-		exchange.empty()
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(exchange.c_str()),
-		routing_key.empty()
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(routing_key.c_str()),
-		amqp_empty_table);
-	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Binding queue");*/
+	if (!exchange.empty() && routing_key.empty()) {
+		amqp_queue_bind(connection->state, id, r->queue, exchange.empty() ? amqp_empty_bytes : amqp_cstring_bytes(exchange.c_str()), routing_key.empty() ? amqp_empty_bytes : amqp_cstring_bytes(routing_key.c_str()), amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Binding queue");
+	}
+
 	return std::string((char*)r->queue.bytes, r->queue.len);
 }
 
 void Channel::publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory, bool immediate)
 {
 	std::unique_lock<std::mutex> lock(connection->mutex);
-	die_on_error(amqp_basic_publish(connection->state, id,
-		exchange.empty()
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(exchange.c_str()),
-		routing_key.empty()
-			? amqp_empty_bytes
-			: amqp_cstring_bytes(routing_key.c_str()),
-		mandatory, immediate, &message.properties, message.body),
-		"Publishing");
+	die_on_error(amqp_basic_publish(connection->state, id, exchange.empty() ? amqp_empty_bytes : amqp_cstring_bytes(exchange.c_str()),
+		routing_key.empty() ? amqp_empty_bytes : amqp_cstring_bytes(routing_key.c_str()), mandatory, immediate, &message.properties, message.body), "Publishing");
 }
 
 void Channel::consume(const std::string &queue_name, void (*callback)(const Envelope &envelope), const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 {
 	{
 		std::unique_lock<std::mutex> lock(connection->mutex);
-		amqp_basic_consume(connection->state, id,
-			queue_name.empty()
-				? amqp_empty_bytes
-				: amqp_cstring_bytes(queue_name.c_str()),
-			consumer_tag.empty()
-				? amqp_empty_bytes
-				: amqp_cstring_bytes(consumer_tag.c_str()),
-			no_local, no_ack, exclusive, amqp_empty_table
-		);
+		amqp_basic_consume(connection->state, id, queue_name.empty() ? amqp_empty_bytes : amqp_cstring_bytes(queue_name.c_str()),
+			consumer_tag.empty() ? amqp_empty_bytes : amqp_cstring_bytes(consumer_tag.c_str()), no_local, no_ack, exclusive, amqp_empty_table);
 		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Consuming");
 	}
 
@@ -155,4 +131,18 @@ void Channel::consume(const std::string &queue_name, void (*callback)(const Enve
 			callback(envelope);
 		}
 	}
+}
+
+int Channel::ack(uint64_t delivery_tag, bool multiple) {
+	std::unique_lock<std::mutex> lock(connection->mutex);
+	auto ack = amqp_basic_ack(connection->state, id, delivery_tag, multiple);
+	die_on_error(ack, "basic.ack");
+	return ack;
+}
+
+int Channel::nack(uint64_t delivery_tag, bool multiple, bool requeue) {
+	std::unique_lock<std::mutex> lock(connection->mutex);
+	auto nack = amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue);
+	die_on_error(nack, "basic.nack");
+	return nack;
 }
