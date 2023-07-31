@@ -9,13 +9,15 @@ int main(int argc, char const *argv[])
 	std::thread t1([&](){
 		Channel channel(&connection);
 
-		channel.consume();
+		channel.declareQueue("lions");
+		channel.consume("lions");
 	});
 
 	std::thread t2([&](){
 		Channel channel(&connection);
-		
-		channel.consume();
+
+		channel.declareQueue("cats");
+		channel.consume("cats");
 	});
 
 	t1.join();

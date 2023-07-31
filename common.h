@@ -2,12 +2,12 @@
 
 #include <string>
 #include <map>
+#include <queue>
 #include <mutex>
 #include <memory>
 #include <rabbitmq-c/amqp.h>
 
-class Message : public amqp_message_t
-{
+class Message : public amqp_message_t {
 public:
 	typedef std::shared_ptr<Message> Ptr;
 
@@ -58,8 +58,7 @@ protected:
 	};
 };
 
-struct Envelope : public amqp_envelope_t
-{
+struct Envelope : public amqp_envelope_t {
 	Envelope(const amqp_envelope_t &envelope) {
 		this->message = envelope.message;
 		this->routing_key = envelope.routing_key;
@@ -69,14 +68,36 @@ struct Envelope : public amqp_envelope_t
 
 	~Envelope() {
 		// envelope a pointer to a amqp_envelope_t object. Caller
-        // should call #amqp_destroy_envelope() when it is done using
-        // the fields in the envelope object.
-		amqp_destroy_envelope(this);
+		// should call #amqp_destroy_envelope() when it is done using
+		// the fields in the envelope object.
+		//amqp_destroy_envelope(this);
 	}
 };
 
-class Connection
-{
+class Connection;
+class Channel {
+public:
+	Channel() {}
+	Channel(Connection *connection);
+	~Channel();
+
+	amqp_queue_declare_ok_t* declareQueue(const std::string& name = "",
+		bool passive = false, bool durable = false, bool auto_delete = false,
+		bool exclusive = false);
+
+	amqp_queue_bind_ok_t* bindQueue(const std::string &queue_name,
+		const std::string &exchange, const std::string &routing_key);
+
+	void consume(const std::string &queue_name, const std::string &consumer_tag = "",
+		bool no_local = false, bool no_ack = false, bool exclusive = false);
+
+	Connection *connection;
+	amqp_channel_t id;
+
+	std::queue<Envelope> envelopes;
+};
+
+class Connection {
 public:
 	Connection(
 		const std::string &host = "127.0.0.1", int port = 5672,
@@ -88,16 +109,6 @@ public:
 	amqp_socket_t *socket = NULL;
 	amqp_connection_state_t state;
 	std::mutex mutex;
-};
-
-class Channel
-{
-public:
-	Channel(Connection *connection);
-	~Channel();
-
-	void consume(const std::string &queue);
-	
-	Connection *connection;
-	amqp_channel_t id;
+	//std::vector<bool> m;
+	std::map<amqp_channel_t, Channel*> channels;
 };

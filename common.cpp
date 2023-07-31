@@ -1,7 +1,10 @@
 #include "common.h"
 #include "utils.h"
 #include <iostream>
+#include <thread>
 #include <rabbitmq-c/tcp_socket.h>
+
+static uint16_t serial = 0;
 
 Connection::Connection(
 	const std::string &host, int port,
@@ -34,12 +37,29 @@ Connection::Connection(
 			user.c_str(), password.c_str()),
 		"Logging in");
 
-	/*std::thread worker([this]() {
-		while(1) {
+	std::thread worker([this]() {
+		for (;;) {
+			std::unique_lock<std::mutex> lock(mutex);
+			if (!channels.empty()) {
+				amqp_rpc_reply_t res;
+				amqp_envelope_t envelope;
 
-		}
+				amqp_maybe_release_buffers(state);
+
+				struct timeval tv = {.tv_sec = 3, .tv_usec = 0};
+
+				res = amqp_consume_message(state, &envelope, &tv, 0);
+
+				if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+					continue;
+				}
+
+				channels[envelope.channel]->envelopes.push(Envelope(envelope));
+				std::cout << (int)envelope.channel << std::endl;
+			}
+	    }
 	});
-	worker.detach();*/
+	worker.detach();
 }
 
 Connection::~Connection() {
@@ -49,13 +69,11 @@ Connection::~Connection() {
 	die_on_error(amqp_destroy_connection(state), "Ending connection");
 }
 
-static uint16_t serial = 0;
-
 Channel::Channel(Connection *connection) {
 	std::unique_lock<std::mutex> lock(connection->mutex);
 	this->connection = connection;
 	this->id = ++serial;
-
+	connection->channels[id] = this;
 	amqp_channel_open(connection->state, id);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state),
 			"Opening channel");
@@ -67,6 +85,68 @@ Channel::~Channel() {
 			"Closing channel");
 }
 
-void Channel::consume(const std::string &queue) {
+amqp_queue_declare_ok_t* Channel::declareQueue(
+	const std::string& name,
+	bool passive,
+	bool durable,
+	bool auto_delete,
+	bool exclusive) {
+	std::unique_lock<std::mutex> lock(connection->mutex);
+	amqp_queue_declare_ok_t *r = amqp_queue_declare(
+		connection->state, id,
+		name.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(name.c_str()),
+		passive, durable, exclusive, auto_delete, amqp_empty_table);
+	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Declaring queue");
+	return r;
+	/*amqp_bytes_t queue_name = amqp_bytes_malloc_dup(r->queue);
+	if (queue_name.bytes == NULL) {
+		throw std::runtime_error("Out of memory while copying queue name");
+	}*/
+}
 
+amqp_queue_bind_ok_t* Channel::bindQueue(
+	const std::string &queue_name,
+	const std::string &exchange,
+	const std::string &routing_key) {
+	std::unique_lock<std::mutex> lock(connection->mutex);
+	amqp_queue_bind_ok_t *r = amqp_queue_bind(connection->state, id, 
+		queue_name.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(queue_name.c_str()),
+		exchange.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(exchange.c_str()),
+		routing_key.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(routing_key.c_str()),
+		amqp_empty_table);
+	die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Binding queue");
+	return r;
+}
+
+void Channel::consume(const std::string &queue_name, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive) {
+	{
+		std::unique_lock<std::mutex> lock(connection->mutex);
+		amqp_basic_consume(connection->state, id,
+			queue_name.empty()
+				? amqp_empty_bytes
+				: amqp_cstring_bytes(queue_name.c_str()),
+			consumer_tag.empty()
+				? amqp_empty_bytes
+				: amqp_cstring_bytes(consumer_tag.c_str()),
+			no_local, no_ack=1, exclusive, amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "Consuming");
+	}
+
+	
+	for (;;) {
+		if (!envelopes.empty()) {
+			Envelope envelope = envelopes.front();
+			envelopes.pop();
+//			std::cout << (int)id << " ";
+//			std::cout << std::string((char*)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
+		}
+	}
 }
