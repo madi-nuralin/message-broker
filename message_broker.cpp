@@ -206,6 +206,7 @@ VistaMessageBroker::~VistaMessageBroker()
 
 void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody)
 {
+
 	Connection connection(m_host, m_port, m_username, m_password, m_vhost, m_frame_max);
 
 	Statement statement;

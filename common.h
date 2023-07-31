@@ -81,20 +81,15 @@ public:
 	Channel(Connection *connection);
 	~Channel();
 
-	amqp_queue_declare_ok_t* declareQueue(const std::string& name = "",
-		bool passive = false, bool durable = false, bool auto_delete = false,
-		bool exclusive = false);
-
-	amqp_queue_bind_ok_t* bindQueue(const std::string &queue_name,
-		const std::string &exchange, const std::string &routing_key);
+	std::string setup_queue(const std::string &queue_name, const std::string &exchange = "", const std::string &routing_key = "",
+		bool passive = false, bool durable = false, bool auto_delete = false, bool exclusive = false);
 
 	void consume(const std::string &queue_name, const std::string &consumer_tag = "",
-		bool no_local = false, bool no_ack = false, bool exclusive = false);
+		bool no_local = false, bool no_ack = true, bool exclusive = false);
 
 	Connection *connection;
 	amqp_channel_t id;
-
-	std::queue<Envelope> envelopes;
+	std::queue<amqp_envelope_t> envelopes;
 };
 
 class Connection {
@@ -109,6 +104,5 @@ public:
 	amqp_socket_t *socket = NULL;
 	amqp_connection_state_t state;
 	std::mutex mutex;
-	//std::vector<bool> m;
 	std::map<amqp_channel_t, Channel*> channels;
 };

@@ -6,17 +6,16 @@
 int main(int argc, char const *argv[])
 {
 	Connection connection("localhost", 5672);
+
 	std::thread t1([&](){
 		Channel channel(&connection);
-
-		channel.declareQueue("lions");
+		auto queue = channel.setup_queue("lions");
 		channel.consume("lions");
 	});
 
 	std::thread t2([&](){
 		Channel channel(&connection);
-
-		channel.declareQueue("cats");
+		channel.setup_queue("cats");
 		channel.consume("cats");
 	});
 
