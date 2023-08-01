@@ -22,8 +22,7 @@ int main(int argc, char const *argv[])
 	VistaMessageBroker broker;
 
 	broker.subscribe({
-		.queue = {.name = "cats"},
-		.binding_key = "cats"
+		.queue = {.name = "cats"}
 	}, [](const auto& message){
 		std::cout << message.serialize() << std::endl;
 	});
@@ -35,6 +34,7 @@ int main(int argc, char const *argv[])
 		std::cout << request.serialize() << std::endl;
 	});
 
-	while(1){}
+	while(1);
+
 	return 0;
 }

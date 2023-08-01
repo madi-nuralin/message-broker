@@ -11,6 +11,7 @@
 
 #include "message_broker.hpp"
 #include "utils.h"
+#include "common.h"
 
 namespace gammasoft {
 
@@ -107,7 +108,7 @@ void VistaMessageBroker::publish(const Configuration conf, const std::string &me
 	std::thread worker([&](){
 		Channel channel(m_conn);
 
-		channel.setup_queue(
+		auto reply_to = channel.setup_queue(
 			conf.queue.name,
 			conf.exchange.name,
 			conf.binding_key,
@@ -123,7 +124,7 @@ void VistaMessageBroker::publish(const Configuration conf, const std::string &me
 		message.setProperty("Content-Type", "application/json");
 		message.setProperty("Correlation-Id", request.reqid().c_str());
 		message.setProperty("Delivery-Mode", (uint8_t)2);
-		message.setProperty("Reply-To", "rpc_queue");
+		message.setProperty("Reply-To", reply_to.c_str());
 	
 		channel.publish(conf.exchange.name, conf.routing_key, message);
 

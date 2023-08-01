@@ -104,10 +104,6 @@ std::string Channel::setup_queue(const std::string &queue_name, const std::strin
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
-	if (!(queue_name.empty() && !routing_key.empty())) {
-		return std::string("");
-	}
-
 	amqp_queue_declare_ok_t *r = 
 		amqp_queue_declare(
 			connection->state,

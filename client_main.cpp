@@ -8,7 +8,7 @@ using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-	VistaMessageBroker broker;
+	/*VistaMessageBroker broker;
 
 	broker.publish({
 		.queue = {.name = "cats"},
@@ -16,14 +16,15 @@ int main(int argc, char const *argv[])
 	}, "{}");
 
 	broker.publish({
+		.queue = {.name = "rpc_queue"},
 		.routing_key = "rpc_queue"
 	}, "{}", [](const auto& response) {
 		std::cout << response.serialize();
 	});
 
-	while(1){}
+	while(1){}*/
 
-	/*Connection connection("localhost", 5672);
+	Connection connection("localhost", 5672);
 
 	std::thread t1([&](){
 		Channel channel(&connection);
@@ -63,5 +64,5 @@ int main(int argc, char const *argv[])
 
 	t1.join();
 	t2.join();
-	t3.join();*/
+	t3.join();/**/
 }
