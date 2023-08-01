@@ -64,50 +64,131 @@ VistaMessageBroker::VistaMessageBroker(
 		throw std::runtime_error("port is not valid, it must be a positive number");
 	}
 
-	m_host = host;
+	/*m_host = host;
 	m_port = port;
 	m_username = username;
 	m_password = password;
 	m_vhost = vhost;
-	m_frame_max = frame_max;
+	m_frame_max = frame_max;*/
+
+	m_conn = new Connection(host, port, username, password, vhost, frame_max);
 }
 
 VistaMessageBroker::~VistaMessageBroker()
 {
-	//
+	delete m_conn;
 }
 
 void VistaMessageBroker::publish(const Configuration conf, const std::string &messagebody)
 {
-	/*Channel channel(&connection);
+	Channel channel(m_conn);
 
-	channel.setup_queue(conf.queue.name, conf.exchange.name, 
-		conf.queue.passive, conf.queue.auto_delete, conf.queue.exclusive);
+	channel.setup_queue(
+		conf.queue.name,
+		conf.exchange.name,
+		conf.routing_key,
+		conf.queue.passive,
+		conf.queue.auto_delete,
+		conf.queue.exclusive
+		);
 
-	Message message(messagebody);
+	Message request;
+	request.setBody(messagebody);
+
+	::Message message(request.serialize());
 	message.setProperty("Content-Type", "application/json");
 	message.setProperty("Delivery-Mode", (uint8_t)2);
 	
-	channel.publish(conf.exchange.name, conf.routing_key, message);*/
+	channel.publish(conf.exchange.name, conf.routing_key, message);
 }
 
-void VistaMessageBroker::publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody)
+void VistaMessageBroker::publish(const Configuration conf, const std::string &messagebody, std::function<void (const Response&)> callback)
 {
+	std::thread worker([&](){
+		Channel channel(m_conn);
+
+		channel.setup_queue(
+			conf.queue.name,
+			conf.exchange.name,
+			conf.binding_key,
+			conf.queue.passive,
+			conf.queue.auto_delete,
+			conf.queue.exclusive
+			);
+
+		Request request;
+		request.setBody(messagebody);
+
+		::Message message(request.serialize());
+		message.setProperty("Content-Type", "application/json");
+		message.setProperty("Correlation-Id", request.reqid().c_str());
+		message.setProperty("Delivery-Mode", (uint8_t)2);
+		message.setProperty("Reply-To", "rpc_queue");
+	
+		channel.publish(conf.exchange.name, conf.routing_key, message);
+
+		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope) {
+			callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
+		});
+	});
+
+	worker.detach();
 }
 
-void VistaMessageBroker::publish(const std::string &exchange, const std::string &routingkey,
-	const std::string &messagebody, void (*callback)(const Response& response))
+void VistaMessageBroker::subscribe(const Configuration conf, std::function<void (const Message&)> callback)
 {
+	std::thread worker([&](){
+		Channel channel(m_conn);
+
+		channel.setup_queue(
+			conf.queue.name,
+			conf.exchange.name,
+			conf.binding_key,
+			conf.queue.passive,
+			conf.queue.auto_delete,
+			conf.queue.exclusive
+			);
+
+		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope) {
+			callback(Message(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
+		});
+	});
+
+	worker.detach();
 }
 
-void VistaMessageBroker::subscribe(const std::string &exchange,
-	const std::string &bindingkey, void (*callback)(const Message& Message))
+void VistaMessageBroker::subscribe(const Configuration conf, std::function<void (const Request&, Response&)> callback)
 {
-}
+	std::thread worker([&](){
+		Channel channel(m_conn);
 
-void VistaMessageBroker::subscribe(const std::string &exchange,
-	const std::string &bindingkey, void (*callback)(const Request &request, Response &response))
-{
+		channel.setup_queue(
+			conf.queue.name,
+			conf.exchange.name,
+			conf.binding_key,
+			conf.queue.passive,
+			conf.queue.auto_delete,
+			conf.queue.exclusive
+			);
+
+		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope){
+			VistaMessageBroker::Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
+			VistaMessageBroker::Response response(request);
+
+			callback(request, response);
+
+			std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
+			std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
+
+			::Message message(response.serialize());
+			message.setProperty("Content-Type", "application/json");
+			message.setProperty("Correlation-Id", correlation_id.c_str());
+
+			channel.publish("", reply_to, message);
+		});
+	});
+
+	worker.detach();
 }
 
 VistaMessageBroker::Message::Message()
@@ -122,7 +203,6 @@ VistaMessageBroker::Message::~Message()
 		json_node_free(m_body);
 	}
 }
-
 
 VistaMessageBroker::Message::Message(const std::string &str)
 	: VistaMessageBroker::Message::Message()

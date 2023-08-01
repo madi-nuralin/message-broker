@@ -21,28 +21,20 @@ int main(int argc, char const *argv[])
 {
 	VistaMessageBroker broker;
 
-#if 0
-	broker.subscribe("amq.direct", "test", [](const auto &statement) {
-		std::cout << statement.serializeBody() << std::endl;
+	broker.subscribe({
+		.queue = {.name = "cats"},
+		.binding_key = "cats"
+	}, [](const auto& message){
+		std::cout << message.serialize() << std::endl;
 	});
 
-	broker.subscribe("amq.direct", "test", [](const auto &statement) {
-		std::cout << statement.serializeBody() << std::endl;
-	});
-#else
-	broker.subscribe("amq.direct", "test",[](const auto &request, auto &response) {
-		printf("1 request: %s\n", request.serialize().c_str());
-		response.setReason("user not found");
-		printf("1 response: %s\n", response.serialize().c_str());
+	broker.subscribe({
+		.queue = {.name = "rpc_queue"}
+	}, [](const auto& request, auto& response){
+		response.setReason("perror");
+		std::cout << request.serialize() << std::endl;
 	});
 
-	broker.subscribe("amq.direct", "test2", [](const auto &request, auto &response) {
-		printf("2 request: %s\n", request.serialize().c_str());
-		response.setReason("user not found");
-		printf("2 response: %s\n", response.serialize().c_str());
-	});
-#endif
 	while(1){}
-
 	return 0;
 }

@@ -6,6 +6,8 @@
 #include <queue>
 #include <mutex>
 #include <memory>
+#include <atomic>
+#include <functional>
 #include <rabbitmq-c/amqp.h>
 
 class Message : public amqp_message_t {
@@ -20,7 +22,7 @@ public:
 	~Message() {
 		// Frees memory associated with a amqp_message_t
 		// allocated in amqp_read_message
-		amqp_destroy_message(this);
+		// amqp_destroy_message(this);
 	}
 
 	void setProperty(const std::string & key, const char *value) {
@@ -89,10 +91,21 @@ public:
 		const std::string &vhost = "/", int frame_max = 131072);
 	~Connection();
 
-	amqp_socket_t *socket = NULL;
+	// connection state object
 	amqp_connection_state_t state;
-	std::map<amqp_channel_t, class Channel*> channels;
-	std::mutex mutex;
+
+	// the pool of consuming channels, id -> Channel(id) map
+	std::map<amqp_channel_t, class Channel*> pool;
+
+	// consumer event loop indication flag
+	std::atomic<bool> run{true};
+
+	// mutex lock for synchronizing amqp_connection_state_t object
+	std::mutex mt_lock;
+
+protected:
+	// TCP socket object
+	amqp_socket_t *socket = NULL;
 };
 
 class Channel {
@@ -101,14 +114,40 @@ public:
 	~Channel();
 
 	std::string setup_queue(const std::string &queue_name, const std::string &exchange = "", const std::string &routing_key = "", bool passive = false, bool durable = false, bool auto_delete = false, bool exclusive = false);
+	
 	void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
-	void consume(const std::string &queue_name, void (*callback)(const Envelope &envelope), const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+	
+	void consume(const std::string &queue_name, std::function<void(Channel &, const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+	
+	void qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global);
+	
 	int ack(uint64_t delivery_tag, bool multiple = false);
+	
 	int nack(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
+	void push_envelope(const amqp_envelope_t& envelope) {
+		m_envelope_queue.push(envelope);
+	}
+
+	amqp_envelope_t pop_envelope() {
+		auto envelope = m_envelope_queue.front();
+		m_envelope_queue.pop();
+		return envelope;
+	}
+
+	bool empty_envelope() {
+		return m_envelope_queue.empty();
+	}
+
+	// channel type or id. 
 	amqp_channel_t id;
+
+	// a binding amqp_connection_state_t object.
 	Connection *connection;
-	std::queue<amqp_envelope_t> envelopes;
+
+protected:
+	// the queue of consumed envelopes.
+	std::queue<amqp_envelope_t> m_envelope_queue;
 };
 
 #endif // __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__

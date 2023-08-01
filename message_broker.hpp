@@ -80,7 +80,6 @@ public:
 			bool auto_delete;
 			bool internal;
 		} exchange;
-
 		struct {
 			std::string name;
 			bool passive;
@@ -88,29 +87,29 @@ public:
 			bool auto_delete;
 			bool exclusive;
 		} queue;
-
 		bool queue_bind;
 		std::string routing_key;
 		std::string binding_key;
 	};
 	
 	void publish(const Configuration configration, const std::string &message);
-	//void publish(Configuration configration, const std::string &messagebody, void (*callback)(const Response &response));
-	//void subscribe(Configuration configration, void (*callback)(const Message &Message));
-	//void subscribe(Configuration configration, void (*callback)(const Request &request, Response &response));
+	void publish(const Configuration configration, const std::string &messagebody, std::function<void (const Response&)> callback);
+	void subscribe(const Configuration configration, std::function<void (const Message&)> callback);
+	void subscribe(const Configuration configration, std::function<void (const Request&, Response&)> callback);
 
-	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
-	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
-	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message &Message));
-	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
+//	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody);
+//	void publish(const std::string &exchange, const std::string &routingkey, const std::string &messagebody, void (*callback)(const Response &response));
+//	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Message &Message));
+//	void subscribe(const std::string &exchange, const std::string &bindingkey, void (*callback)(const Request &request, Response &response));
 
 private:
-	std::string m_host;
+	/*std::string m_host;
 	std::string m_username;
 	std::string m_password;
 	std::string m_vhost;
 	int m_port;
-	int m_frame_max;
+	int m_frame_max;*/
+	Connection *m_conn;
 };
 
 } // end namespace gammasoft
