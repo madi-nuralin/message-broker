@@ -72,25 +72,25 @@ VistaMessageBroker::VistaMessageBroker(
 	m_vhost = vhost;
 	m_frame_max = frame_max;*/
 
-	m_conn = new Connection(host, port, username, password, vhost, frame_max);
+	connection = new Connection(host, port, username, password, vhost, frame_max);
 }
 
 VistaMessageBroker::~VistaMessageBroker()
 {
-	delete m_conn;
+	delete connection;
 }
 
-void VistaMessageBroker::publish(const Configuration conf, const std::string &messagebody)
+void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody)
 {
-	Channel channel(m_conn);
+	Channel channel(connection);
 
 	channel.setup_queue(
-		conf.queue.name,
-		conf.exchange.name,
-		conf.routing_key,
-		conf.queue.passive,
-		conf.queue.auto_delete,
-		conf.queue.exclusive
+		configuration.queue.name,
+		configuration.exchange.name,
+		configuration.routing_key,
+		configuration.queue.passive,
+		configuration.queue.auto_delete,
+		configuration.queue.exclusive
 		);
 
 	Message request;
@@ -100,21 +100,21 @@ void VistaMessageBroker::publish(const Configuration conf, const std::string &me
 	message.setProperty("Content-Type", "application/json");
 	message.setProperty("Delivery-Mode", (uint8_t)2);
 	
-	channel.publish(conf.exchange.name, conf.routing_key, message);
+	channel.publish(configuration.exchange.name, configuration.routing_key, message);
 }
 
-void VistaMessageBroker::publish(const Configuration conf, const std::string &messagebody, std::function<void (const Response&)> callback)
+void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
 {
-	std::thread worker([&](){
-		Channel channel(m_conn);
+	std::thread worker([=](){
+		Channel channel(connection);
 
 		auto reply_to = channel.setup_queue(
-			conf.queue.name,
-			conf.exchange.name,
-			conf.binding_key,
-			conf.queue.passive,
-			conf.queue.auto_delete,
-			conf.queue.exclusive
+			configuration.queue.name,
+			configuration.exchange.name,
+			configuration.binding_key,
+			configuration.queue.passive,
+			configuration.queue.auto_delete,
+			configuration.queue.exclusive
 			);
 
 		Request request;
@@ -126,9 +126,9 @@ void VistaMessageBroker::publish(const Configuration conf, const std::string &me
 		message.setProperty("Delivery-Mode", (uint8_t)2);
 		message.setProperty("Reply-To", reply_to.c_str());
 	
-		channel.publish(conf.exchange.name, conf.routing_key, message);
+		channel.publish(configuration.exchange.name, configuration.routing_key, message);
 
-		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope) {
+		channel.consume(configuration.queue.name, [&](auto& channel, const auto& envelope) {
 			callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
 		});
 	});
@@ -136,21 +136,21 @@ void VistaMessageBroker::publish(const Configuration conf, const std::string &me
 	worker.detach();
 }
 
-void VistaMessageBroker::subscribe(const Configuration conf, std::function<void (const Message&)> callback)
+void VistaMessageBroker::subscribe(const Configuration configuration, std::function<void (const Message&)> callback)
 {
-	std::thread worker([&](){
-		Channel channel(m_conn);
+	std::thread worker([=](){
+		Channel channel(connection);
 
 		channel.setup_queue(
-			conf.queue.name,
-			conf.exchange.name,
-			conf.binding_key,
-			conf.queue.passive,
-			conf.queue.auto_delete,
-			conf.queue.exclusive
+			configuration.queue.name,
+			configuration.exchange.name,
+			configuration.binding_key,
+			configuration.queue.passive,
+			configuration.queue.auto_delete,
+			configuration.queue.exclusive
 			);
 
-		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope) {
+		channel.consume(configuration.queue.name, [&](auto& channel, const auto& envelope) {
 			callback(Message(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
 		});
 	});
@@ -158,21 +158,21 @@ void VistaMessageBroker::subscribe(const Configuration conf, std::function<void 
 	worker.detach();
 }
 
-void VistaMessageBroker::subscribe(const Configuration conf, std::function<void (const Request&, Response&)> callback)
+void VistaMessageBroker::subscribe(const Configuration configuration, std::function<void (const Request&, Response&)> callback)
 {
-	std::thread worker([&](){
-		Channel channel(m_conn);
+	std::thread worker([=](){
+		Channel channel(connection);
 
 		channel.setup_queue(
-			conf.queue.name,
-			conf.exchange.name,
-			conf.binding_key,
-			conf.queue.passive,
-			conf.queue.auto_delete,
-			conf.queue.exclusive
+			configuration.queue.name,
+			configuration.exchange.name,
+			configuration.binding_key,
+			configuration.queue.passive,
+			configuration.queue.auto_delete,
+			configuration.queue.exclusive
 			);
 
-		channel.consume(conf.queue.name, [&callback](auto& channel, const auto& envelope){
+		channel.consume(configuration.queue.name, [&callback](auto& channel, const auto& envelope){
 			VistaMessageBroker::Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
 			VistaMessageBroker::Response response(request);
 

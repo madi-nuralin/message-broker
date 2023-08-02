@@ -71,6 +71,21 @@ public:
 		std::string m_reason;
 	};
 
+	/**
+	 * @brief Class for specifying the RabbitMQ queue and exchange
+	 * parameters, like declaration, binding and etc.
+	 * @note While making changes, ensure that the class
+	 * must be an aggregate type that has:
+	 *   -no user-declared constructors
+	 *   -no user-provided, inherited, or explicit constructors
+	 *   -no user-declared or inherited constructors
+	 *   -no private or protected direct non-static data members no base classes
+	 *   -no virtual base classes
+	 *   -no private or protected direct base classes
+	 *   -no virtual member functions
+	 *   -no default member initializers
+	 * in order to be compliant with "designated initialization".
+	 */
 	struct Configuration {
 		struct {
 			std::string name;
@@ -92,7 +107,7 @@ public:
 		std::string binding_key;
 	};
 	
-	void publish(const Configuration configration, const std::string &message);
+	void publish(const Configuration configration, const std::string &messagebody);
 	void publish(const Configuration configration, const std::string &messagebody, std::function<void (const Response&)> callback);
 	void subscribe(const Configuration configration, std::function<void (const Message&)> callback);
 	void subscribe(const Configuration configration, std::function<void (const Request&, Response&)> callback);
@@ -109,7 +124,7 @@ private:
 	std::string m_vhost;
 	int m_port;
 	int m_frame_max;*/
-	Connection *m_conn;
+	Connection *connection;
 };
 
 } // end namespace gammasoft
