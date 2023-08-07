@@ -1,5 +1,5 @@
-#ifndef  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__CLASS__H__
-#define  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__CLASS__H__
+#ifndef  MESSAGE_BROKER_H
+#define  MESSAGE_BROKER_H
 
 #include <map>
 #include <string>
@@ -13,15 +13,15 @@
 
 namespace gammasoft {
 
-class VistaMessageBroker
+class MessageBroker
 {
 public:
-	VistaMessageBroker(
+	MessageBroker(
 		const std::string &host = "127.0.0.1", int port = 5672,
 		const std::string &username = "guest",
 		const std::string &password = "guest",
 		const std::string &vhost = "/", int frame_max = 131072);
-	~VistaMessageBroker();
+	~MessageBroker();
 
 	class Message
 	{
@@ -129,4 +129,4 @@ private:
 
 } // end namespace gammasoft
 
-#endif // __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__CLASS__H__
+#endif // MESSAGE_BROKER_H

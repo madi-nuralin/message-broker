@@ -1,5 +1,5 @@
-#ifndef  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__
-#define  __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__
+#ifndef  COMMON_H
+#define  COMMON_H
 
 #include <string>
 #include <map>
@@ -150,4 +150,4 @@ protected:
 	std::queue<amqp_envelope_t> m_envelope_queue;
 };
 
-#endif // __GAMMA__VISTA_FOUNDATION_SERVER__VISTA_MESSAGE_BROKER__COMMON__H__
+#endif // COMMON_H

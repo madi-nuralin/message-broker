@@ -8,7 +8,7 @@
 
 #include <assert.h>
 #include <thread>
-#include "utils.h"
+#include "../utils.h"
 
 int main(int argc, char const *const *argv)
 {

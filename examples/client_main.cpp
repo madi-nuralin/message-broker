@@ -1,14 +1,14 @@
 #include <iostream>
 #include <thread>
 
-#include "message_broker.hpp"
-#include "common.h"
+#include "../message_broker.hpp"
+#include "../common.h"
 
 using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-	/*VistaMessageBroker broker;
+	/*MessageBroker broker;
 
 	broker.publish({
 		.queue = {.name = "cats"},

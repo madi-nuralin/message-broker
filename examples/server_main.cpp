@@ -5,7 +5,7 @@
 #include <json-glib/json-glib.h>
 #include <json-glib/json-gobject.h>
 
-#include "message_broker.hpp"
+#include "../message_broker.hpp"
 #include "user.hpp"
 #include <chrono>
 #include <thread>
@@ -19,7 +19,7 @@ using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-	VistaMessageBroker broker;
+	MessageBroker broker;
 
 	broker.subscribe({
 		.queue = {.name = "cats"}

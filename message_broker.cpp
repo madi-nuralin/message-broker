@@ -48,7 +48,7 @@ static void build_json_from_json_reader(JsonReader *reader, JsonBuilder *builder
 	}
 }
 
-VistaMessageBroker::VistaMessageBroker(
+MessageBroker::MessageBroker(
 	const std::string &host, int port,
 	const std::string &username,
 	const std::string &password,
@@ -75,12 +75,12 @@ VistaMessageBroker::VistaMessageBroker(
 	connection = new Connection(host, port, username, password, vhost, frame_max);
 }
 
-VistaMessageBroker::~VistaMessageBroker()
+MessageBroker::~MessageBroker()
 {
 	delete connection;
 }
 
-void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody)
+void MessageBroker::publish(const Configuration configuration, const std::string &messagebody)
 {
 	Channel channel(connection);
 
@@ -103,7 +103,7 @@ void VistaMessageBroker::publish(const Configuration configuration, const std::s
 	channel.publish(configuration.exchange.name, configuration.routing_key, message);
 }
 
-void VistaMessageBroker::publish(const Configuration configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
+void MessageBroker::publish(const Configuration configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
 {
 	std::thread worker([=](){
 		Channel channel(connection);
@@ -136,7 +136,7 @@ void VistaMessageBroker::publish(const Configuration configuration, const std::s
 	worker.detach();
 }
 
-void VistaMessageBroker::subscribe(const Configuration configuration, std::function<void (const Message&)> callback)
+void MessageBroker::subscribe(const Configuration configuration, std::function<void (const Message&)> callback)
 {
 	std::thread worker([=](){
 		Channel channel(connection);
@@ -158,7 +158,7 @@ void VistaMessageBroker::subscribe(const Configuration configuration, std::funct
 	worker.detach();
 }
 
-void VistaMessageBroker::subscribe(const Configuration configuration, std::function<void (const Request&, Response&)> callback)
+void MessageBroker::subscribe(const Configuration configuration, std::function<void (const Request&, Response&)> callback)
 {
 	std::thread worker([=](){
 		Channel channel(connection);
@@ -173,8 +173,8 @@ void VistaMessageBroker::subscribe(const Configuration configuration, std::funct
 			);
 
 		channel.consume(configuration.queue.name, [&callback](auto& channel, const auto& envelope){
-			VistaMessageBroker::Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
-			VistaMessageBroker::Response response(request);
+			MessageBroker::Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
+			MessageBroker::Response response(request);
 
 			callback(request, response);
 
@@ -192,21 +192,21 @@ void VistaMessageBroker::subscribe(const Configuration configuration, std::funct
 	worker.detach();
 }
 
-VistaMessageBroker::Message::Message()
+MessageBroker::Message::Message()
 	: m_reqid(generateReqId()), m_type("message")
 {
 	m_body = json_node_new(JSON_NODE_NULL);
 }
 
-VistaMessageBroker::Message::~Message()
+MessageBroker::Message::~Message()
 {
 	if (m_body) {
 		json_node_free(m_body);
 	}
 }
 
-VistaMessageBroker::Message::Message(const std::string &str)
-	: VistaMessageBroker::Message::Message()
+MessageBroker::Message::Message(const std::string &str)
+	: MessageBroker::Message::Message()
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -237,8 +237,8 @@ VistaMessageBroker::Message::Message(const std::string &str)
 	}
 }
 
-VistaMessageBroker::Response::Response(const std::string &str)
-	: VistaMessageBroker::Message::Message(str)
+MessageBroker::Response::Response(const std::string &str)
+	: MessageBroker::Message::Message(str)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	json_parser_load_from_data(parser, (gchar*)str.c_str(), -1, NULL);
@@ -250,7 +250,7 @@ VistaMessageBroker::Response::Response(const std::string &str)
 	json_reader_end_member(reader);
 }
 
-bool VistaMessageBroker::Message::setBody(const std::string &body, std::string *error)
+bool MessageBroker::Message::setBody(const std::string &body, std::string *error)
 {
 	g_autoptr(JsonParser) parser = json_parser_new();
 	g_autoptr(GError) gerror = nullptr;
@@ -265,7 +265,7 @@ bool VistaMessageBroker::Message::setBody(const std::string &body, std::string *
 	return this->setBody(json_parser_get_root(parser), error);
 }
 
-bool VistaMessageBroker::Message::setBody(const JsonNode* json_node, std::string *error)
+bool MessageBroker::Message::setBody(const JsonNode* json_node, std::string *error)
 {
 	if (m_body) {
 		json_node_free(m_body);
@@ -307,17 +307,17 @@ static std::string _serialize(const std::string &reqid, const std::string &type,
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
-std::string VistaMessageBroker::Message::serialize() const
+std::string MessageBroker::Message::serialize() const
 {
 	return _serialize(m_reqid, m_type, m_body);
 }
 
-std::string VistaMessageBroker::Response::serialize() const
+std::string MessageBroker::Response::serialize() const
 {
 	return _serialize(m_reqid, m_type, m_body, m_reason);
 }
 
-std::string VistaMessageBroker::Message::serializeBody() const
+std::string MessageBroker::Message::serializeBody() const
 {
 	g_autoptr(JsonGenerator) gen = json_generator_new();
 	json_generator_set_root(gen, m_body);
@@ -325,7 +325,7 @@ std::string VistaMessageBroker::Message::serializeBody() const
 	return std::string(json_generator_to_data(gen, NULL));
 }
 
-void VistaMessageBroker::Response::setReason(const std::string &reason)
+void MessageBroker::Response::setReason(const std::string &reason)
 {
 	m_type = reason.empty() ? "response" : "error";
 	m_reason = reason;
