@@ -9,6 +9,7 @@
 #include <atomic>
 #include <utility>
 #include <functional>
+
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
 
@@ -145,7 +146,16 @@ public:
 		}
 	};
 
+	/**
+	 * @brief A single channel multiplexed in an AMQP connection.
+	 * More described below later.
+	 */
 	class Channel;
+
+	/**
+	 * @brief Creates a new connection to an AMQP broker
+	 * using the supplied parameters.
+	 */
 	class Connection {
 	public:
 		Connection(
@@ -167,11 +177,16 @@ public:
 		// Mutex lock for synchronizing amqp_connection_state_t object
 		std::mutex mt_lock;
 
+
 	protected:
 		// TCP socket object
 		amqp_socket_t *socket = NULL;
 	};
 
+	/**
+	 * @brief A single channel multiplexed in an AMQP connection.
+	 * Represents a logical AMQP channel multiplexed over a connection
+	 */
 	class Channel {
 	public:
 		Channel(Connection *connection);

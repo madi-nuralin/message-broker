@@ -2,7 +2,6 @@
 #include <assert.h>
 #include <thread>
 #include <stdexcept>
-#include <sstream>
 #include <glib.h>
 
 #include "message_broker.hpp"
