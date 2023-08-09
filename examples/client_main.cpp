@@ -1,30 +1,29 @@
 #include <iostream>
 #include <thread>
-
+#include <glib.h>
 #include "../message_broker.hpp"
-#include "../common.h"
 
 using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-	/*MessageBroker broker;
+	/**/MessageBroker broker;
 
 	broker.publish({
-		.queue = {.name = "cats"},
-		.routing_key = "cats"
-	}, "{}");
+		.queue = {.name = "hello", .declare = true},
+		.routing_key = "hello"
+	}, "hello");
 
 	broker.publish({
-		.queue = {.name = "rpc_queue"},
+		.queue = {.exclusive = true, .declare = true},
 		.routing_key = "rpc_queue"
-	}, "{}", [](const auto& response) {
-		std::cout << response.serialize();
+	}, "30", [](const auto& response) {
+		g_message("[.] Got  fib(%d) = %s", 30, response.getBody().c_str());
 	});
 
-	while(1){}*/
+	while(1){}/**/
 
-	Connection connection("localhost", 5672);
+	/*Connection connection("localhost", 5672);
 
 	std::thread t1([&](){
 		Channel channel(&connection);

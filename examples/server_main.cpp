@@ -1,40 +1,41 @@
-#include <vector>
-#include <iostream>
-
-#include <glib-object.h>
-#include <json-glib/json-glib.h>
-#include <json-glib/json-gobject.h>
-
+#include <glib.h>
 #include "../message_broker.hpp"
-#include "user.hpp"
-#include <chrono>
-#include <thread>
-
-std::vector<User> users({
-	{1, "Alan Turing"},
-	{2, "Keith Williams"}
-});
 
 using namespace gammasoft;
+
+int fib(int n)
+{
+    switch (n)
+    {
+    case 0:
+        return 0;
+    case 1:
+        return 1;
+    default:
+        return fib(n - 1) + fib(n - 2);
+    }
+}
 
 int main(int argc, char const *argv[])
 {
 	MessageBroker broker;
 
 	broker.subscribe({
-		.queue = {.name = "cats"}
+		.queue = {.name = "hello", .declare = true}
 	}, [](const auto& message){
-		std::cout << message.serialize() << std::endl;
+		g_message("[x] Received b'%s'", message.getBody().c_str());
 	});
 
 	broker.subscribe({
-		.queue = {.name = "rpc_queue"}
+		.queue = {.name = "rpc_queue", .declare = true}
 	}, [](const auto& request, auto& response){
-		response.setReason("perror");
-		std::cout << request.serialize() << std::endl;
+		auto n = std::stoi(request.getBody());
+		g_message("[.] fib('%d')", n);
+		response.setBody(std::to_string(fib(n)));
+		return true;
 	});
 
-	while(1);
+	while(1);/**/
 
 	return 0;
 }
