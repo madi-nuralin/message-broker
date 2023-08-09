@@ -5,6 +5,19 @@
 
 using namespace gammasoft;
 
+int fib(int n)
+{
+    switch (n)
+    {
+    case 0:
+        return 0;
+    case 1:
+        return 1;
+    default:
+        return fib(n - 1) + fib(n - 2);
+    }
+}
+
 int main(int argc, char const *argv[])
 {
 	/**/MessageBroker broker;
@@ -21,13 +34,22 @@ int main(int argc, char const *argv[])
 		g_message("[.] Got  fib(%d) = %s", 30, response.getBody().c_str());
 	});
 
+	broker.subscribe({
+		.queue = {.name = "rpc_queue", .declare = true}
+	}, [](const auto& request, auto& response){
+		auto n = std::stoi(request.getBody());
+		g_message("[.] fib('%d')", n);
+		response.setBody(std::to_string(fib(n)));
+		return true;
+	});
+
 	while(1){}/**/
 
 	/*Connection connection("localhost", 5672);
 
 	std::thread t1([&](){
 		Channel channel(&connection);
-		channel.setup_queue("rpc_queue");
+		channel.setup("rpc_queue");
 		channel.consume("rpc_queue", [](auto& channel, const auto& envelope) {
 			std::cout << (int)envelope.channel << " ";
 			std::cout << std::string((char*)envelope.message.body.bytes, envelope.message.body.len) << std::endl;
@@ -63,5 +85,5 @@ int main(int argc, char const *argv[])
 
 	t1.join();
 	t2.join();
-	t3.join();/**/
+	t3.join();**/
 }

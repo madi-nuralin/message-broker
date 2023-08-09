@@ -90,7 +90,7 @@ void MessageBroker::publish(const Configuration configuration, const std::string
 
 		channel.consume(reply_to, [&](auto& channel, const auto& envelope) {
 			callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
-			//channel.close();
+			channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
 		});
 	});
 
@@ -210,7 +210,7 @@ MessageBroker::Connection::Connection(
 
 MessageBroker::Connection::~Connection() {
 	std::unique_lock<std::mutex> lock(mt_lock);
-	
+
 	pool.clear();
 	run = false;
 
@@ -360,17 +360,29 @@ void MessageBroker::Channel::consume(const std::string &queue_name, std::functio
 	}
 
 	g_debug("[x] Awaiting requests on channel %d", id);
-	
-	for (;;) {
-		if (!empty_envelope()) {
+	receive = true;
+
+	while (receive) {
+		while (!empty_envelope()) {
 			auto envelope = Envelope(pop_envelope());
 			callback(*this, envelope);
 		}
 	}
 
 	g_debug("[x] Stop listening requests on channel %d", id);
-
 	connection->pool.erase(id);
+}
+
+void MessageBroker::Channel::cancel(const std::string &consumer_tag)
+{
+	std::unique_lock<std::mutex> lock(connection->mt_lock);
+
+	receive = false;
+
+	if (!consumer_tag.empty()) {
+		amqp_basic_cancel(connection->state, id, amqp_cstring_bytes(consumer_tag.c_str()));
+		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "basic.cancel");
+	}
 }
 
 void MessageBroker::Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
@@ -382,22 +394,16 @@ void MessageBroker::Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count
 	}
 }
 
-int MessageBroker::Channel::ack(uint64_t delivery_tag, bool multiple)
+void MessageBroker::Channel::acknowledge(uint64_t delivery_tag, bool multiple)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
-	
-	auto res = amqp_basic_ack(connection->state, id, delivery_tag, multiple);
-	die_on_error(res, "basic.ack");
-	return res;
+	die_on_error(amqp_basic_ack(connection->state, id, delivery_tag, multiple), "basic.ack");
 }
 
-int MessageBroker::Channel::nack(uint64_t delivery_tag, bool multiple, bool requeue)
+void MessageBroker::Channel::reject(uint64_t delivery_tag, bool multiple, bool requeue)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
-
-	auto res = amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue);
-	die_on_error(res, "basic.nack");
-	return res;
+	die_on_error(amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue), "basic.nack");
 }
 
 } // end namespace gammasoft

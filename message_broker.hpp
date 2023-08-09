@@ -180,14 +180,16 @@ public:
 		std::tuple<std::string, std::string> setup(const Configuration &configration);
 		
 		void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
-		
+
 		void consume(const std::string &queue_name, std::function<void(Channel &, const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
-		
+
+		void cancel(const std::string &consumer_tag);
+
 		void qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global);
-		
-		int ack(uint64_t delivery_tag, bool multiple = false);
-		
-		int nack(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
+
+		void acknowledge(uint64_t delivery_tag, bool multiple = false);
+
+		void reject(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
 		void push_envelope(const amqp_envelope_t& envelope) {
 			m_envelope_queue.push(envelope);
@@ -210,6 +212,8 @@ public:
 		Connection *connection;
 
 	protected:
+		bool receive = false;
+
 		// Queue of consumed envelopes.
 		std::queue<amqp_envelope_t> m_envelope_queue;
 	};
