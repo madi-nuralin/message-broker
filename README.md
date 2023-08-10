@@ -5,7 +5,10 @@
 Client:
 ```cpp
 broker.publish({
-    .queue = {.exclusive = true, .declare = true},
+    .queue = {
+        .exclusive = true,
+        .declare = true
+    },
     .routing_key = "rpc_queue"
   }, number, [&](const auto& response) {
     std::cout << "[.] Got  fib(" << number << ") = " <<  response.getBody() << std::endl;
