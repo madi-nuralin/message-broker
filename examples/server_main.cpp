@@ -1,4 +1,4 @@
-#include <glib.h>
+#include <iostream>
 #include "../message_broker.hpp"
 
 using namespace gammasoft;
@@ -21,19 +21,33 @@ int main(int argc, char const *argv[])
 	MessageBroker broker;
 
 	broker.subscribe({
-		.queue = {.name = "hello", .declare = true}
-	}, [](const auto& message){
-		g_message("[x] Received b'%s'", message.getBody().c_str());
-	});
+			.queue = {
+				.name = "hello",
+				.declare = true
+			},
+			.on_error = [](const auto& e) {
+				std::cerr << e << std::endl;
+			}
+		}, [](const auto& message) {
+			std::cout << "[x] Received b'" << message.getBody() << "'" << std::endl;
+		}
+	);
 
 	broker.subscribe({
-		.queue = {.name = "rpc_queue", .declare = true}
-	}, [](const auto& request, auto& response){
-		auto n = std::stoi(request.getBody());
-		g_message("[.] fib('%d')", n);
-		response.setBody(std::to_string(fib(n)));
-		return true;
-	});
+			.queue = {
+				.name = "rpc_queue",
+				.declare = true
+			},
+			.on_error = [](const auto& e) {
+				std::cerr << e << std::endl;
+			}
+		}, [](const auto& request, auto& response){
+			auto number = std::stoi(request.getBody());
+			std::cout << "[.] fib(" <<  number << ")" << std::endl;
+			response.setBody(std::to_string(fib(number)));
+			return true;
+		}
+	);
 
 	while(1);/**/
 

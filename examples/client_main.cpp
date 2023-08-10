@@ -1,47 +1,40 @@
 #include <iostream>
 #include <thread>
-#include <glib.h>
+#include <iostream>
 #include "../message_broker.hpp"
 
 using namespace gammasoft;
 
-int fib(int n)
-{
-    switch (n)
-    {
-    case 0:
-        return 0;
-    case 1:
-        return 1;
-    default:
-        return fib(n - 1) + fib(n - 2);
-    }
-}
-
 int main(int argc, char const *argv[])
 {
-	/**/MessageBroker broker;
+	MessageBroker broker;
 
 	broker.publish({
-		.queue = {.name = "hello", .declare = true},
-		.routing_key = "hello"
-	}, "hello");
+			.queue = {
+				.name = "hello",
+				.declare = true
+			},
+			.routing_key = "hello",
+			.on_error = [](const auto& e) {
+				std::cerr << e << std::endl;
+			}
+		}, "hello"
+	);
 
 	broker.publish({
-		.queue = {.exclusive = true, .declare = true},
-		.routing_key = "rpc_queue"
-	}, "30", [](const auto& response) {
-		g_message("[.] Got  fib(%d) = %s", 30, response.getBody().c_str());
-	});
+			.queue = {
+				.exclusive = true,
+				.declare = true
+			},
+			.routing_key = "rpc_queue",
+			.on_error = [](const auto& e) {
+				std::cerr << e << std::endl;
+			}
+		}, "30", [](const auto& response) {
+			std::cout << "[.] Got  fib(" << 30 << ") = " <<  response.getBody() << std::endl;
+		}
+	);
 
-	broker.subscribe({
-		.queue = {.name = "rpc_queue", .declare = true}
-	}, [](const auto& request, auto& response){
-		auto n = std::stoi(request.getBody());
-		g_message("[.] fib('%d')", n);
-		response.setBody(std::to_string(fib(n)));
-		return true;
-	});
 
 	while(1){}/**/
 

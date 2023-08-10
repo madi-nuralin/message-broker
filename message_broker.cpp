@@ -58,39 +58,51 @@ MessageBroker::~MessageBroker()
 
 void MessageBroker::publish(const Configuration configuration, const std::string &messagebody)
 {
-	Channel channel(connection);
+	std::thread worker([=](){
+		try {
+			Channel channel(connection);
 
-	auto[exchange, queue] = channel.setup(configuration);
+			auto[exchange, queue] = channel.setup(configuration);
 
-	Message message;
-	message.setBody(messagebody);
-	message.setProperty("Content-Type", "application/json");
-	message.setProperty("Delivery-Mode", (uint8_t)2);
-	
-	channel.publish(exchange, configuration.routing_key, message);
+			Message message;
+			message.setBody(messagebody);
+			message.setProperty("Content-Type", "application/json");
+			message.setProperty("Delivery-Mode", (uint8_t)2);
+			
+			channel.publish(exchange, configuration.routing_key, message);
+		} catch (const std::runtime_error &e) {
+			configuration.on_error(e.what());
+		}
+	});
+
+	worker.detach();
 }
 
 void MessageBroker::publish(const Configuration configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
 {
 	std::thread worker([=](){
-		Channel channel(connection);
+		try {
+			Channel channel(connection);
 
-		auto[exchange, reply_to] = channel.setup(configuration);
+			auto[exchange, reply_to] = channel.setup(configuration);
 
-		Message request;
-		request.setBody(messagebody);
-		request.setProperty("Content-Type", "application/json");
-		request.setProperty("Correlation-Id", generateReqId().c_str());
-		request.setProperty("Delivery-Mode", (uint8_t)2);
-		request.setProperty("Reply-To", reply_to.c_str());
-		request.setProperty("Type", "request");
-	
-		channel.publish(exchange, configuration.routing_key, request);
+			Message request;
+			request.setBody(messagebody);
+			request.setProperty("Content-Type", "application/json");
+			request.setProperty("Correlation-Id", generateReqId().c_str());
+			request.setProperty("Delivery-Mode", (uint8_t)2);
+			request.setProperty("Reply-To", reply_to.c_str());
+			request.setProperty("Type", "request");
+		
+			channel.publish(exchange, configuration.routing_key, request);
 
-		channel.consume(reply_to, [&](auto& channel, const auto& envelope) {
-			callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
-			channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
-		});
+			channel.consume(reply_to, [&](auto& channel, const auto& envelope) {
+				callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
+				channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
+			});
+		} catch (const std::runtime_error &e) {
+			configuration.on_error(e.what());
+		}
 	});
 
 	worker.detach();
@@ -99,13 +111,17 @@ void MessageBroker::publish(const Configuration configuration, const std::string
 void MessageBroker::subscribe(const Configuration configuration, std::function<void (const Message&)> callback)
 {
 	std::thread worker([=](){
-		Channel channel(connection);
+		try {
+			Channel channel(connection);
 
-		auto[exchange, queue] = channel.setup(configuration);
+			auto[exchange, queue] = channel.setup(configuration);
 
-		channel.consume(queue, [&](auto& channel, const auto& envelope) {
-			callback(Message(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
-		});
+			channel.consume(queue, [&](auto& channel, const auto& envelope) {
+				callback(Message(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
+			});
+		} catch (const std::runtime_error& e) {
+			configuration.on_error(e.what());
+		}
 	});
 
 	worker.detach();
@@ -114,26 +130,30 @@ void MessageBroker::subscribe(const Configuration configuration, std::function<v
 void MessageBroker::subscribe(const Configuration configuration, std::function<bool (const Request&, Response&)> callback)
 {
 	std::thread worker([=](){
-		Channel channel(connection);
+		try {
+			Channel channel(connection);
 
-		auto[exchange, queue] = channel.setup(configuration);
+			auto[exchange, queue] = channel.setup(configuration);
 
-		channel.consume(queue, [&callback](auto& channel, const auto& envelope){
-			Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
-			Response response;
+			channel.consume(queue, [&callback](auto& channel, const auto& envelope){
+				Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
+				Response response;
 
-			auto res = callback(request, response);
+				auto res = callback(request, response);
 
-			std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
-			std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
+				std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
+				std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
 
-			response.setProperty("Content-Type", "application/json");
-			response.setProperty("Correlation-Id", correlation_id.c_str());
-			response.setProperty("Delivery-Mode", (uint8_t)2);
-			response.setProperty("Type", res ? "response" : "error");
+				response.setProperty("Content-Type", "application/json");
+				response.setProperty("Correlation-Id", correlation_id.c_str());
+				response.setProperty("Delivery-Mode", (uint8_t)2);
+				response.setProperty("Type", res ? "response" : "error");
 
-			channel.publish("", reply_to, response);
-		});
+				channel.publish("", reply_to, response);
+			});
+		} catch (const std::runtime_error &e) {
+			configuration.on_error(e.what());
+		}
 	});
 
 	worker.detach();
@@ -146,7 +166,7 @@ void MessageBroker::subscribe(const Configuration configuration, std::function<b
 // serial auto-increment for channel id
 static uint16_t serial = 0;
 
-MessageBroker::Connection::Connection(
+Connection::Connection(
 	const std::string &host, int port,
 	const std::string &user,
 	const std::string &password,
@@ -207,7 +227,7 @@ MessageBroker::Connection::Connection(
 	worker.detach();
 }
 
-MessageBroker::Connection::~Connection() {
+Connection::~Connection() {
 	std::unique_lock<std::mutex> lock(mt_lock);
 
 	pool.clear();
@@ -220,7 +240,7 @@ MessageBroker::Connection::~Connection() {
 	//amqp_socket_close(socket);
 }
 
-MessageBroker::Channel::Channel(Connection *connection) {
+Channel::Channel(Connection *connection) {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
 	this->id = ++serial;
@@ -231,7 +251,7 @@ MessageBroker::Channel::Channel(Connection *connection) {
 			"Opening channel");
 }
 
-MessageBroker::Channel::~Channel() {
+Channel::~Channel() {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
 	die_on_amqp_error(
@@ -239,7 +259,7 @@ MessageBroker::Channel::~Channel() {
 			"Closing channel");
 }
 
-std::tuple<std::string, std::string> MessageBroker::Channel::setup(const Configuration& configuration)
+std::tuple<std::string, std::string> Channel::setup(const Configuration& configuration)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
@@ -313,7 +333,7 @@ std::tuple<std::string, std::string> MessageBroker::Channel::setup(const Configu
 	return std::make_tuple(exchange, queue);
 }
 
-void MessageBroker::Channel::publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory, bool immediate)
+void Channel::publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory, bool immediate)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
@@ -334,7 +354,7 @@ void MessageBroker::Channel::publish(const std::string &exchange, const std::str
 		"Publishing");
 }
 
-void MessageBroker::Channel::consume(const std::string &queue_name, std::function<void(Channel &, const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
+void Channel::consume(const std::string &queue_name, std::function<void(Channel &, const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 {
 	{
 		std::unique_lock<std::mutex> lock(connection->mt_lock);
@@ -372,7 +392,7 @@ void MessageBroker::Channel::consume(const std::string &queue_name, std::functio
 	connection->pool.erase(id);
 }
 
-void MessageBroker::Channel::cancel(const std::string &consumer_tag)
+void Channel::cancel(const std::string &consumer_tag)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
@@ -384,7 +404,7 @@ void MessageBroker::Channel::cancel(const std::string &consumer_tag)
 	}
 }
 
-void MessageBroker::Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
+void Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
@@ -393,13 +413,13 @@ void MessageBroker::Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count
 	}
 }
 
-void MessageBroker::Channel::acknowledge(uint64_t delivery_tag, bool multiple)
+void Channel::acknowledge(uint64_t delivery_tag, bool multiple)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 	die_on_error(amqp_basic_ack(connection->state, id, delivery_tag, multiple), "basic.ack");
 }
 
-void MessageBroker::Channel::reject(uint64_t delivery_tag, bool multiple, bool requeue)
+void Channel::reject(uint64_t delivery_tag, bool multiple, bool requeue)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 	die_on_error(amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue), "basic.nack");
