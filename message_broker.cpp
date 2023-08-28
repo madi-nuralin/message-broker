@@ -3,165 +3,13 @@
 #include <thread>
 #include <stdexcept>
 #include <glib.h>
-
 #include "message_broker.hpp"
 #include "utils.h"
+#include <iostream>
 
 namespace gammasoft {
 
-const char ALPHABET[] = {
-    "0123456789"
-    "abcdefgjhiklmnopqrstvwxyz"
-    "ABCDEFGJHIKLMNOPQRSTVWXYZ"
-};
-
-static std::string generateReqId()
-{
-	std::string result;
-	for(std::size_t i = 0; i < 16; i++) {
-		result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
-	}
-	return result;
-}
-
-MessageBroker::MessageBroker(
-	const std::string &host, int port,
-	const std::string &username,
-	const std::string &password,
-	const std::string &vhost, int frame_max) {
-	std::srand(std::time(NULL));
-
-	if (host.empty()) {
-		throw std::runtime_error("host is not specified, it is required");
-	}
-	if (vhost.empty()) {
-		throw std::runtime_error("vhost is not specified, it is required");
-	}
-	if (port <= 0) {
-		throw std::runtime_error("port is not valid, it must be a positive number");
-	}
-
-	/*m_host = host;
-	m_port = port;
-	m_username = username;
-	m_password = password;
-	m_vhost = vhost;
-	m_frame_max = frame_max;*/
-
-	connection = new Connection(host, port, username, password, vhost, frame_max);
-}
-
-MessageBroker::~MessageBroker()
-{
-	delete connection;
-}
-
-void MessageBroker::publish(const Configuration configuration, const std::string &messagebody)
-{
-	std::thread worker([=](){
-		try {
-			Channel channel(connection);
-
-			auto[exchange, queue] = channel.setup(configuration);
-
-			Message message;
-			message.setBody(messagebody);
-			message.setProperty("Content-Type", "application/json");
-			message.setProperty("Delivery-Mode", (uint8_t)2);
-			
-			channel.publish(exchange, configuration.routing_key, message);
-		} catch (const std::runtime_error &e) {
-			configuration.on_error(e.what());
-		}
-	});
-
-	worker.detach();
-}
-
-void MessageBroker::publish(const Configuration configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
-{
-	std::thread worker([=](){
-		try {
-			Channel channel(connection);
-
-			auto[exchange, reply_to] = channel.setup(configuration);
-
-			Message request;
-			request.setBody(messagebody);
-			request.setProperty("Content-Type", "application/json");
-			request.setProperty("Correlation-Id", generateReqId().c_str());
-			request.setProperty("Delivery-Mode", (uint8_t)2);
-			request.setProperty("Reply-To", reply_to.c_str());
-			request.setProperty("Type", "request");
-		
-			channel.publish(exchange, configuration.routing_key, request);
-
-			channel.consume(reply_to, [&](auto& channel, const auto& envelope) {
-				callback(Response(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
-				channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
-			});
-		} catch (const std::runtime_error &e) {
-			configuration.on_error(e.what());
-		}
-	});
-
-	worker.detach();
-}
-
-void MessageBroker::subscribe(const Configuration configuration, std::function<void (const Message&)> callback)
-{
-	std::thread worker([=](){
-		try {
-			Channel channel(connection);
-
-			auto[exchange, queue] = channel.setup(configuration);
-
-			channel.consume(queue, [&](auto& channel, const auto& envelope) {
-				callback(Message(std::string((char*)envelope.message.body.bytes, envelope.message.body.len)));
-			});
-		} catch (const std::runtime_error& e) {
-			configuration.on_error(e.what());
-		}
-	});
-
-	worker.detach();
-}
-
-void MessageBroker::subscribe(const Configuration configuration, std::function<bool (const Request&, Response&)> callback)
-{
-	std::thread worker([=](){
-		try {
-			Channel channel(connection);
-
-			auto[exchange, queue] = channel.setup(configuration);
-
-			channel.consume(queue, [&callback](auto& channel, const auto& envelope){
-				Request request(std::string((char*)envelope.message.body.bytes, envelope.message.body.len));
-				Response response;
-
-				auto res = callback(request, response);
-
-				std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
-				std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
-
-				response.setProperty("Content-Type", "application/json");
-				response.setProperty("Correlation-Id", correlation_id.c_str());
-				response.setProperty("Delivery-Mode", (uint8_t)2);
-				response.setProperty("Type", res ? "response" : "error");
-
-				channel.publish("", reply_to, response);
-			});
-		} catch (const std::runtime_error &e) {
-			configuration.on_error(e.what());
-		}
-	});
-
-	worker.detach();
-}
-
-// 
-// rabbitmq-c wrapper
-// 
+namespace amqp {
 
 // serial auto-increment for channel id
 static uint16_t serial = 0;
@@ -170,21 +18,9 @@ Connection::Connection(
 	const std::string &host, int port,
 	const std::string &user,
 	const std::string &password,
-	const std::string &vhost, int frame_max) {
-	if (host.empty()) {
-		throw std::runtime_error("host is not specified, it is required");
-	}
-	if (vhost.empty()) {
-		throw std::runtime_error("vhost is not specified, it is required");
-	}
-	if (port <= 0) {
-		throw std::runtime_error("port is not valid, it must be a positive number");
-	}
-
-	/*
-		establish a channel that is used to connect RabbitMQ server
-	*/
-
+	const std::string &vhost, int frame_max
+	)
+{
 	state = amqp_new_connection();
 
 	socket = amqp_tcp_socket_new(state);
@@ -194,7 +30,7 @@ Connection::Connection(
 
 	int status = amqp_socket_open(socket, host.c_str(), port);
 	if (status) {
-		die("opening TCP socket");
+		die("opening TCP socket: %s:%d", host.c_str(), port);
 	}
 
 	die_on_amqp_error(amqp_login(state, vhost.c_str(), 0, frame_max, 0, AMQP_SASL_METHOD_PLAIN,
@@ -227,7 +63,8 @@ Connection::Connection(
 	worker.detach();
 }
 
-Connection::~Connection() {
+Connection::~Connection()
+{
 	std::unique_lock<std::mutex> lock(mt_lock);
 
 	pool.clear();
@@ -240,7 +77,8 @@ Connection::~Connection() {
 	//amqp_socket_close(socket);
 }
 
-Channel::Channel(Connection *connection) {
+Channel::Channel(Connection *connection)
+{
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 
 	this->id = ++serial;
@@ -378,7 +216,7 @@ void Channel::consume(const std::string &queue_name, std::function<void(Channel 
 		connection->pool[id] = this;
 	}
 
-	g_debug("[x] Awaiting requests on channel %d", id);
+	std::cout << "Awaiting requests on channel " << id << std::endl;
 	receive = true;
 
 	while (receive) {
@@ -388,7 +226,7 @@ void Channel::consume(const std::string &queue_name, std::function<void(Channel 
 		}
 	}
 
-	g_debug("[x] Stop listening requests on channel %d", id);
+	std::cout << "Stop listening requests on channel " << id << std::endl;
 	connection->pool.erase(id);
 }
 
@@ -423,6 +261,200 @@ void Channel::reject(uint64_t delivery_tag, bool multiple, bool requeue)
 {
 	std::unique_lock<std::mutex> lock(connection->mt_lock);
 	die_on_error(amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue), "basic.nack");
+}
+
+} // end namespace amqp
+
+using namespace gammasoft::amqp;
+
+const char ALPHABET[] = {
+    "0123456789"
+    "abcdefgjhiklmnopqrstvwxyz"
+    "ABCDEFGJHIKLMNOPQRSTVWXYZ"
+};
+
+static std::string generateReqId()
+{
+	std::string result;
+	for(std::size_t i = 0; i < 16; i++) {
+		result += ALPHABET[rand()%(sizeof(ALPHABET)-1)];
+	}
+	return result;
+}
+
+MessageBroker::MessageBroker(
+	const std::string &host, int port,
+	const std::string &username,
+	const std::string &password,
+	const std::string &vhost, int frame_max
+	)
+{
+	std::srand(std::time(NULL));
+
+	if (host.empty()) {
+		throw std::runtime_error("host is not specified, it is required");
+	}
+	if (vhost.empty()) {
+		throw std::runtime_error("vhost is not specified, it is required");
+	}
+	if (port <= 0) {
+		throw std::runtime_error("port is not valid, it must be a positive number");
+	}
+
+	m_connection = std::make_shared<Connection>(host, port, username, password, vhost, frame_max);
+}
+
+MessageBroker::MessageBroker(
+	const std::string &url, int frame_max
+	)
+{
+	std::srand(std::time(NULL));
+
+	struct amqp_connection_info ci;
+	char *p = strdup(url.c_str());
+
+	die_on_error(
+		amqp_parse_url(p, &ci), "Parse URL");
+
+	m_connection = std::make_shared<Connection>(ci.host,
+		ci.port,ci.user, ci.password, ci.vhost, frame_max);
+
+	free(p);
+}
+
+MessageBroker::~MessageBroker()
+{
+}
+
+void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
+{
+	Channel channel(m_connection.get());
+
+	auto[exchange, queue] = channel.setup(configuration);
+
+	Message message;
+	message.setBody(messagebody);
+	message.setProperty("Content-Type", "application/json");
+	message.setProperty("Delivery-Mode", (uint8_t)2);
+	
+	channel.publish(exchange, configuration.routing_key, message);
+}
+
+void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
+{
+	std::thread worker([=](){
+		try {
+			Channel channel(m_connection.get());
+
+			auto[exchange, reply_to] = channel.setup(configuration);
+
+			Message request;
+			request.setBody(messagebody);
+			request.setProperty("Content-Type", "application/json");
+			request.setProperty("Correlation-Id", generateReqId().c_str());
+			request.setProperty("Delivery-Mode", (uint8_t)2);
+			request.setProperty("Reply-To", reply_to.c_str());
+			request.setProperty("Type", "request");
+
+			channel.publish(exchange, configuration.routing_key, request);
+			channel.consume(reply_to, [&](auto& channel, const auto& envelope) {
+				callback(envelope.message);
+				channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
+			});
+		} catch (const std::runtime_error &e) {
+			if (configuration.on_error) {
+				configuration.on_error(e.what());
+				return;
+			}
+			std::cerr << e.what() << std::endl;
+		}
+	});
+
+	worker.detach();
+}
+
+MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configuration, const std::string &messagebody, struct timeval *timeout)
+{
+	Channel channel(m_connection.get());
+
+	auto[exchange, reply_to] = channel.setup(configuration);
+
+	Request request;
+	request.setBody(messagebody);
+	request.setProperty("Content-Type", "application/json");
+	request.setProperty("Correlation-Id", generateReqId().c_str());
+	request.setProperty("Delivery-Mode", (uint8_t)2);
+	request.setProperty("Reply-To", reply_to.c_str());
+	request.setProperty("Type", "request");
+
+	Response::Ptr response;
+
+	channel.publish(exchange, configuration.routing_key, request);
+	channel.consume(reply_to, [&](auto& channel, const auto& envelope){
+		response = std::make_shared<Response>(envelope.message);
+		channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
+	});
+
+	return response;
+}
+
+void MessageBroker::subscribe(const Configuration &configuration, std::function<void (const Message&)> callback)
+{
+	std::thread worker([=](){
+		try {
+			Channel channel(m_connection.get());
+
+			auto[exchange, queue] = channel.setup(configuration);
+
+			channel.consume(queue, [&](auto& channel, const auto& envelope) {
+				callback(envelope.message);
+			});
+		} catch (const std::runtime_error& e) {
+			if (configuration.on_error) {
+				configuration.on_error(e.what());
+				return;
+			}
+			std::cerr << e.what() << std::endl;
+		}
+	});
+
+	worker.detach();
+}
+
+void MessageBroker::subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback)
+{
+	std::thread worker([=](){
+		try {
+			Channel channel(m_connection.get());
+
+			auto[exchange, queue] = channel.setup(configuration);
+
+			channel.consume(queue, [&callback](auto& channel, const auto& envelope){
+				Request request(envelope.message);
+				Response response;
+
+				auto ok = callback(request, response);
+
+				std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
+				std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
+
+				response.setProperty("Content-Type", "application/json");
+				response.setProperty("Correlation-Id", correlation_id.c_str());
+				response.setProperty("Delivery-Mode", (uint8_t)2);
+				response.setProperty("Type", ok ? "response" : "error");
+
+				channel.publish("", reply_to, response);
+			});
+		} catch (const std::runtime_error &e) {
+			if (configuration.on_error) {
+				configuration.on_error(e.what());
+				return;
+			}
+			std::cerr << e.what() << std::endl;
+		}
+	});
+
+	worker.detach();
 }
 
 } // end namespace gammasoft

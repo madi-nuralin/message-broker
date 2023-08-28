@@ -7,13 +7,10 @@ using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-	MessageBroker broker;
+	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 
 	broker.publish({
-			.queue = {
-				.name = "hello",
-				.declare = true
-			},
+			.queue = {.name = "hello",.declare = true},
 			.routing_key = "hello",
 			.on_error = [](const auto& e) {
 				std::cerr << e << std::endl;
@@ -22,10 +19,7 @@ int main(int argc, char const *argv[])
 	);
 
 	broker.publish({
-			.queue = {
-				.exclusive = true,
-				.declare = true
-			},
+			.queue = {.exclusive = true,.declare = true},
 			.routing_key = "rpc_queue",
 			.on_error = [](const auto& e) {
 				std::cerr << e << std::endl;
@@ -34,9 +28,8 @@ int main(int argc, char const *argv[])
 			std::cout << "[.] Got  fib(" << 30 << ") = " <<  response.getBody() << std::endl;
 		}
 	);
-
-
-	while(1){}/**/
+while(1){}
+//	broker.wait();
 
 	/*Connection connection("localhost", 5672);
 

@@ -18,7 +18,7 @@ int fib(int n)
 
 int main(int argc, char const *argv[])
 {
-	MessageBroker broker;
+	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 
 	broker.subscribe({
 			.queue = {
