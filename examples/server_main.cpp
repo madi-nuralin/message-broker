@@ -1,6 +1,43 @@
 #include <iostream>
 #include "../message_broker.hpp"
 
+/*#include <condition_variable>
+#include <mutex>
+#include <iostream>
+#include <signal.h>
+
+static std::condition_variable _condition;
+static std::mutex _mutex;
+    class InterruptHandler {
+    public:
+        static void hookSIGINT() {
+            signal(SIGINT, handleUserInterrupt);        
+            signal(SIGTERM, handleUserInterrupt);        
+        }
+
+        static void handleUserInterrupt(int signal) {
+            switch (signal) {
+                case SIGINT:
+                    std::cout << "SIGINT trapped" << std::endl;
+                    _condition.notify_one();
+                    break;
+                case SIGTERM:
+                    std::cout << "SIGTERM trapped" << std::endl;
+                    _condition.notify_one();
+                    break;
+                default:
+                    std::cout << "Unknown signal {} trapped " << signal << std::endl;
+            }
+        }
+
+        static void waitForUserInterrupt() {
+            std::unique_lock<std::mutex> lock { _mutex };
+            _condition.wait(lock);
+            lock.unlock();
+            std::cout << "Signal requests to exit" << std::endl;
+        }
+    };
+*/
 using namespace gammasoft;
 
 int fib(int n)
@@ -18,6 +55,7 @@ int fib(int n)
 
 int main(int argc, char const *argv[])
 {
+//	InterruptHandler::hookSIGINT();
 	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 
 	broker.subscribe({
@@ -49,7 +87,7 @@ int main(int argc, char const *argv[])
 		}
 	);
 
-	while(1);/**/
-
+//	InterruptHandler::waitForUserInterrupt();
+	while(1){}
 	return 0;
 }

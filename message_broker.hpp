@@ -9,6 +9,7 @@
 #include <atomic>
 #include <utility>
 #include <functional>
+#include <set>
 
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
@@ -177,12 +178,33 @@ public:
 	}
 };
 
+class id_interval 
+{
+public:
+	id_interval(int ll, int uu) : left_(ll), right_(uu) {}
+	bool operator < (const id_interval& ) const;
+	int left() const { return left_; }
+	int right() const {  return right_; }
+private:
+	int left_, right_;
+};
+
+class IdManager {
+public:
+	IdManager();
+	int allocateId();          // Allocates an id
+	void freeId(int id);       // Frees an id so it can be used again
+	bool markAsUsed(int id);   // Let's the user register an id. 
+private: 
+	typedef std::set<id_interval> id_intervals_t;
+	id_intervals_t free_;
+};
+
 /**
  * @brief Creates a new connection to an AMQP broker
  * using the supplied parameters.
  */
-class Connection {
-public:
+struct Connection {
 	typedef std::shared_ptr<Connection> Ptr;
 
 	/**
@@ -204,30 +226,18 @@ public:
 		const std::string &vhost = "/", int frame_max = 131072);
 	~Connection();
 
-	// Connection state object
+	std::mutex lock;
+	std::map<amqp_channel_t,class Channel*> pool;
 	amqp_connection_state_t state;
-
-	// The pool of consuming channels, id -> Channel(id) map
-	std::map<amqp_channel_t, class Channel*> pool;
-
-	// Consumer event loop indication flag
-	std::atomic<bool> run{true};
-
-	// Mutex lock for synchronizing amqp_connection_state_t object
-	std::mutex mt_lock;
-
-
-protected:
-	// TCP socket object
-	amqp_socket_t *socket = NULL;
+	IdManager manager;
+	std::atomic<bool> listen{true};
 };
 
 /**
  * @brief A single channel multiplexed in an AMQP connection.
  * Represents a logical AMQP channel multiplexed over a connection
  */
-class Channel {
-public:
+struct Channel {
 	Channel(Connection *connection);
 	~Channel();
 
@@ -235,7 +245,7 @@ public:
 	
 	void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
 
-	void consume(const std::string &queue_name, std::function<void(Channel &, const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+	void consume(const std::string &queue_name, struct timeval *timeout, std::function<void(Channel &, const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
 
 	void cancel(const std::string &consumer_tag);
 
@@ -245,31 +255,10 @@ public:
 
 	void reject(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
-	void push_envelope(const amqp_envelope_t& envelope) {
-		m_envelope_queue.push(envelope);
-	}
-
-	amqp_envelope_t pop_envelope() {
-		auto envelope = m_envelope_queue.front();
-		m_envelope_queue.pop();
-		return envelope;
-	}
-
-	bool empty_envelope() {
-		return m_envelope_queue.empty();
-	}
-
-	// Channel id.
 	amqp_channel_t id;
-
-	// The binding amqp_connection_state_t object.
 	Connection *connection;
-
-protected:
-	bool receive = false;
-
-	// Queue of consumed envelopes.
-	std::queue<amqp_envelope_t> m_envelope_queue;
+	std::queue<amqp_envelope_t> envelopes;
+	bool is_basic_cancel = true;
 };
 
 /**
@@ -341,16 +330,16 @@ public:
 
 	/// Basic messaging pattern for publish events.
 	void publish(const Configuration &configuration, const std::string &messagebody);
-	
+
 	/// RPC messaging pattern for asynchronous publish events.
 	void publish(const Configuration &configuration, const std::string &messagebody, std::function<void (const Response&)> callback);
-	
+
 	/// RPC messaging pattern for publish events.
-	Response::Ptr publish(const Configuration &configuration, const std::string &messagebody, struct timeval*);
-	
+	Response::Ptr publish(const Configuration &configuration, const std::string &messagebody, struct timeval *timeout);
+
 	/// Basic messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<void (const Message&)> callback);
-	
+
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
 

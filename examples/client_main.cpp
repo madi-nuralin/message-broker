@@ -10,7 +10,10 @@ int main(int argc, char const *argv[])
 	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 
 	broker.publish({
-			.queue = {.name = "hello",.declare = true},
+			.queue = {
+				.name = "hello",
+				.declare = true
+			},
 			.routing_key = "hello",
 			.on_error = [](const auto& e) {
 				std::cerr << e << std::endl;
@@ -18,18 +21,21 @@ int main(int argc, char const *argv[])
 		}, "hello"
 	);
 
-	broker.publish({
-			.queue = {.exclusive = true,.declare = true},
+	struct timeval timeout{5,0};
+	auto response = broker.publish({
+			.queue = {
+				.exclusive = true,
+				.declare = true
+			},
 			.routing_key = "rpc_queue",
-			.on_error = [](const auto& e) {
-				std::cerr << e << std::endl;
-			}
-		}, "30", [](const auto& response) {
-			std::cout << "[.] Got  fib(" << 30 << ") = " <<  response.getBody() << std::endl;
-		}
-	);
-while(1){}
-//	broker.wait();
+		}, "30", &timeout);
+
+	if (response->ok())
+	{
+		std::cout << "[.] Got  fib(" << 30 << ") = " <<  response->getBody() << std::endl;
+	}
+
+	//broker.m_connection->~Connection();
 
 	/*Connection connection("localhost", 5672);
 
