@@ -15,82 +15,6 @@ namespace gammasoft {
 
 namespace amqp {
 
-IdManager::IdManager()
-{
-    free_.insert(id_interval(1, std::numeric_limits<int>::max()));
-}
-
-int IdManager::allocateId()
-{
-    id_interval first = *(free_.begin());
-    int free_id = first.left();
-    free_.erase(free_.begin());
-    if (first.left() + 1 <= first.right()) {
-        free_.insert(id_interval(first.left() + 1 , first.right()));
-    }
-    return free_id;
-}
-
-bool IdManager::markAsUsed(int id)
-{
-    id_intervals_t::iterator it = free_.find(id_interval(id,id));
-    if (it == free_.end()) {
-        return false;
-    } else {
-        id_interval free_interval = *(it);
-        free_.erase (it);
-        if (free_interval.left() < id) {
-            free_.insert(id_interval(free_interval.left(), id-1));
-        }
-        if (id +1 <= free_interval.right() ) {
-            free_.insert(id_interval(id+1, free_interval.right()));
-        }
-        return true;
-    }
-}
-
-void IdManager::freeId(int id)
-{
-    id_intervals_t::iterator it = free_.find(id_interval(id,id));
-    if (it != free_.end()  && it->left() <= id && it->right() > id) {
-        return ;
-    }
-    it = free_.upper_bound(id_interval(id,id));
-    if (it == free_.end()) {
-        return ;
-    } else {
-        id_interval free_interval = *(it);
-
-        if (id + 1 != free_interval.left()) {
-            free_.insert(id_interval(id, id));
-        } else {
-            if (it != free_.begin()) {
-                id_intervals_t::iterator it_2 = it;
-                --it_2;
-                if (it_2->right() + 1 == id ) {
-                    id_interval free_interval_2 = *(it_2);
-                    free_.erase(it);
-                    free_.erase(it_2);
-                    free_.insert(
-                        id_interval(free_interval_2.left(), 
-                                    free_interval.right()));
-                } else {
-                    free_.erase(it);
-                    free_.insert(id_interval(id, free_interval.right()));
-                }
-            } else {
-                    free_.erase(it);
-                    free_.insert(id_interval(id, free_interval.right()));
-            }
-        }
-    }
-}
-
-bool id_interval::operator < (const id_interval& s) const
-{
-    return (left_ < s.left_) && (right_ < s.right_);
-}
-
 Connection::Connection(
 	const std::string &host, int port,
 	const std::string &user,
@@ -113,47 +37,17 @@ Connection::Connection(
 	die_on_amqp_error(amqp_login(state, vhost.c_str(), 0, frame_max, 0, AMQP_SASL_METHOD_PLAIN,
 			user.c_str(), password.c_str()),
 		"Logging in");
-
-	std::thread worker([this]() {
-		while (listen) {
-			std::unique_lock<std::mutex> lock(this->lock);
-			if (!pool.empty()) {
-				amqp_rpc_reply_t res;
-				amqp_envelope_t envelope;
-
-				amqp_maybe_release_buffers(state);
-
-				struct timeval tv = {.tv_sec = 0, .tv_usec = 100};
-
-				res = amqp_consume_message(state, &envelope, &tv, 0);
-
-				if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-					continue;
-				}
-
-				pool[envelope.channel]->envelopes.push(envelope);
-			}
-		}
-	});
-
-	worker.detach();
 }
 
 Connection::~Connection()
 {
-	std::unique_lock<std::mutex> lock(this->lock);
-	listen = false;
-	pool.clear();
 	die_on_amqp_error(amqp_connection_close(state, AMQP_REPLY_SUCCESS),
 			"Closing connection");
 	die_on_error(amqp_destroy_connection(state), "Ending connection");
 }
 
-Channel::Channel(Connection *connection)
+Channel::Channel(Connection *connection) : id(1), connection(connection)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
-	this->id = connection->manager.allocateId();
-	this->connection = connection;
 	amqp_channel_open(connection->state, id);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state),
 			"Opening channel");
@@ -161,16 +55,13 @@ Channel::Channel(Connection *connection)
 
 Channel::~Channel()
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
 	die_on_amqp_error(
 		amqp_channel_close(connection->state, id, AMQP_REPLY_SUCCESS),
 			"Closing channel");
-	connection->manager.freeId(id);
 }
 
 std::tuple<std::string, std::string> Channel::setup(const Configuration& configuration)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
 	std::string exchange, queue;
 
 	if (configuration.exchange.name == "amq") {
@@ -243,8 +134,6 @@ std::tuple<std::string, std::string> Channel::setup(const Configuration& configu
 
 void Channel::publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory, bool immediate)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
-
 	die_on_error(
 		amqp_basic_publish(
 			connection->state,
@@ -259,60 +148,43 @@ void Channel::publish(const std::string &exchange, const std::string &routing_ke
 			immediate,
 			&message.properties,
 			message.body),
-		"Publishing");
+		"basic.publish");
 }
 
-void Channel::consume(const std::string &queue_name, struct timeval *timeout, std::function<void(Channel &, const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
+void Channel::consume(const std::string &queue_name, struct timeval *timeout, std::function<void(const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 {
-	{
-		std::unique_lock<std::mutex> lock(connection->lock);
+	amqp_basic_consume(
+		connection->state,
+		id,
+		queue_name.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(queue_name.c_str()),
+		consumer_tag.empty()
+			? amqp_empty_bytes
+			: amqp_cstring_bytes(consumer_tag.c_str()),
+		no_local,
+		no_ack,
+		exclusive,
+				;
 
-		amqp_basic_consume(
-			connection->state,
-			id,
-			queue_name.empty()
-				? amqp_empty_bytes
-				: amqp_cstring_bytes(queue_name.c_str()),
-			consumer_tag.empty()
-				? amqp_empty_bytes
-				: amqp_cstring_bytes(consumer_tag.c_str()),
-			no_local,
-			no_ack,
-			exclusive,
-			amqp_empty_table);
-		die_on_amqp_error(
-			amqp_get_rpc_reply(connection->state), "Consuming");
+	for (;;) {
+		amqp_rpc_reply_t res;
+		amqp_envelope_t envelope;
 
-		connection->pool[id] = this;
-		std::cout << "Awaiting requests on channel " << id << std::endl;
-	}
+		amqp_maybe_release_buffers(state);
 
-	std::chrono::time_point start = std::chrono::steady_clock::now();
-	is_basic_cancel = false;
-	while (!is_basic_cancel) {
-		while (!envelopes.empty()) {
-			auto envelope = Envelope(envelopes.front());
-			envelopes.pop();
-			callback(*this, envelope);
-			start = std::chrono::steady_clock::now();
+		res = amqp_consume_message(state, &envelope, &tv, 0);
+
+		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+			continue;
 		}
 
-		if (timeout) {
-			if (std::chrono::steady_clock::now() - start > 
-				std::chrono::milliseconds(timeout->tv_sec*1000 + timeout->tv_usec)) {
-				throw std::runtime_error("AMQP consumer not responding, connection timed out");
-			}
-		}
+		callback(envelope);
 	}
-
-	connection->pool.erase(id);
-	std::cout << "Stop listening requests on channel " << id << std::endl;
 }
 
 void Channel::cancel(const std::string &consumer_tag)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
-	is_basic_cancel = true;
 	if (!consumer_tag.empty()) {
 		amqp_basic_cancel(connection->state, id, amqp_cstring_bytes(consumer_tag.c_str()));
 		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "basic.cancel");
@@ -321,7 +193,6 @@ void Channel::cancel(const std::string &consumer_tag)
 
 void Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
 	if (!amqp_basic_qos(connection->state, id, prefetch_count, prefetch_size, global)) {
 		die_on_amqp_error(amqp_get_rpc_reply(connection->state), "basic.qos");
 	}
@@ -329,13 +200,11 @@ void Channel::qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
 
 void Channel::acknowledge(uint64_t delivery_tag, bool multiple)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
 	die_on_error(amqp_basic_ack(connection->state, id, delivery_tag, multiple), "basic.ack");
 }
 
 void Channel::reject(uint64_t delivery_tag, bool multiple, bool requeue)
 {
-	std::unique_lock<std::mutex> lock(connection->lock);
 	die_on_error(amqp_basic_nack(connection->state, id, delivery_tag, multiple, requeue), "basic.nack");
 }
 
