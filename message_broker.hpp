@@ -307,6 +307,13 @@ public:
 
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
+private:
+	std::string m_host;
+	int m_port;
+	std::string m_username;
+	std::string m_password;
+	std::string m_vhost;
+	int v_frame_max;
 };
 
 } // end namespace gammasoft
