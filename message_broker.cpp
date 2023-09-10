@@ -162,6 +162,7 @@ void Channel::consume(const std::string &queue_name, struct timeval *timeout, st
 		no_ack,
 		exclusive,
 		amqp_empty_table);
+
 	die_on_amqp_error(
 		amqp_get_rpc_reply(connection->state), "Consuming");
 
@@ -276,7 +277,7 @@ MessageBroker::MessageBroker(
 
 void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
 {
-	Connection connection(,m_frame_max);
+	Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
 	Channel channel(&connection);
 
 	auto[exchange, queue] = channel.setup(configuration);
@@ -291,6 +292,7 @@ void MessageBroker::publish(const Configuration &configuration, const std::strin
 
 MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configuration, const std::string &messagebody, struct timeval *timeout)
 {
+	Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
 	Channel channel(&connection);
 
 	auto[exchange, reply_to] = channel.setup(configuration);
@@ -306,7 +308,7 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 	Response::Ptr response;
 
 	channel.publish(exchange, configuration.routing_key, request);
-	channel.consume(reply_to, timeout, [&](auto& channel, const auto& envelope){
+	channel.consume(reply_to, timeout, [&](const auto& envelope){
 		response = std::make_shared<Response>(envelope.message);
 		channel.close();
 	});
@@ -318,7 +320,8 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 {
 	std::thread worker([=](){
 		try {
-			Channel channel(m_connection.get());
+			Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
+			Channel channel(&connection);
 
 			auto[exchange, queue] = channel.setup(configuration);
 
@@ -341,6 +344,7 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 {
 	std::thread worker([=](){
 		try {
+			Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
 			Channel channel(m_connection.get());
 
 			auto[exchange, queue] = channel.setup(configuration);
