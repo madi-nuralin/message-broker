@@ -294,7 +294,7 @@ public:
 		const std::string &username,
 		const std::string &password,
 		const std::string &vhost, int frame_max = 131072);
-	~MessageBroker();
+	virtual ~MessageBroker();
 
 	/// Basic messaging pattern for publish events.
 	void publish(const Configuration &configuration, const std::string &messagebody);
