@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
 #include <glib.h>
-#include <set>
-#include <chrono>
-#include <thread>
-#include <limits>
 #include <stdexcept>
 #include <iostream>
 
@@ -245,8 +241,6 @@ MessageBroker::MessageBroker(
 	if (port <= 0) {
 		throw std::runtime_error("port is not valid, it must be a positive number");
 	}
-
-	m_connection = std::make_shared<Connection>(host, port, username, password, vhost, frame_max);
 }
 
 MessageBroker::MessageBroker(
@@ -261,7 +255,7 @@ MessageBroker::MessageBroker(
 	die_on_error(
 		amqp_parse_url(p, &ci), "Parse URL");
 
-	m_connection = std::make_shared<Connection>(ci.host,ci.port,ci.user,ci.password,ci.vhost,frame_max);
+	//
 
 	free(p);
 }
@@ -272,7 +266,8 @@ MessageBroker::~MessageBroker()
 
 void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
 {
-	Channel channel(m_connection.get());
+	Connection connection(,m_frame_max);
+	Channel channel(&connection);
 
 	auto[exchange, queue] = channel.setup(configuration);
 
@@ -284,42 +279,9 @@ void MessageBroker::publish(const Configuration &configuration, const std::strin
 	channel.publish(exchange, configuration.routing_key, message);
 }
 
-void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody, std::function<void (const Response&)> callback)
-{
-	std::thread worker([=](){
-		try {
-			Channel channel(m_connection.get());
-
-			auto[exchange, reply_to] = channel.setup(configuration);
-
-			Request request;
-			request.setBody(messagebody);
-			request.setProperty("Content-Type", "application/json");
-			request.setProperty("Correlation-Id", generateReqId().c_str());
-			request.setProperty("Delivery-Mode", (uint8_t)2);
-			request.setProperty("Reply-To", reply_to.c_str());
-			request.setProperty("Type", "request");
-
-			channel.publish(exchange, configuration.routing_key, request);
-			channel.consume(reply_to, nullptr, [&](auto& channel, const auto& envelope) {
-				callback(envelope.message);
-				channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
-			});
-		} catch (const std::runtime_error &e) {
-			if (configuration.on_error) {
-				configuration.on_error(e.what());
-				return;
-			}
-			std::cout << e.what() << std::endl;
-		}
-	});
-
-	worker.detach();
-}
-
 MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configuration, const std::string &messagebody, struct timeval *timeout)
 {
-	Channel channel(m_connection.get());
+	Channel channel(&connection);
 
 	auto[exchange, reply_to] = channel.setup(configuration);
 
@@ -336,7 +298,7 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 	channel.publish(exchange, configuration.routing_key, request);
 	channel.consume(reply_to, timeout, [&](auto& channel, const auto& envelope){
 		response = std::make_shared<Response>(envelope.message);
-		channel.cancel(std::string((char *)envelope.consumer_tag.bytes, envelope.consumer_tag.len));
+		channel.close();
 	});
 
 	return response;
