@@ -161,7 +161,9 @@ void Channel::consume(const std::string &queue_name, struct timeval *timeout, st
 		no_local,
 		no_ack,
 		exclusive,
-				;
+		amqp_empty_table);
+	die_on_amqp_error(
+		amqp_get_rpc_reply(connection->state), "Consuming");
 
 	for (;;) {
 		amqp_rpc_reply_t res;
@@ -241,6 +243,13 @@ MessageBroker::MessageBroker(
 	if (port <= 0) {
 		throw std::runtime_error("port is not valid, it must be a positive number");
 	}
+
+	m_host = host;
+	m_port = port;
+	m_username = username;
+	m_password = password;
+	m_vhost = vhost;
+	m_frame_max = frame_max;
 }
 
 MessageBroker::MessageBroker(
@@ -255,13 +264,14 @@ MessageBroker::MessageBroker(
 	die_on_error(
 		amqp_parse_url(p, &ci), "Parse URL");
 
-	//
+	m_host = ci.host;
+	m_port = ci.port;
+	m_username = ci.user;
+	m_password = ci.password;
+	m_vhost = ci.vhost;
+	m_frame_max = frame_max;
 
 	free(p);
-}
-
-MessageBroker::~MessageBroker()
-{
 }
 
 void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
