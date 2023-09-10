@@ -2,14 +2,10 @@
 #define  MESSAGE_BROKER_H
 
 #include <map>
-#include <queue>
 #include <string>
 #include <memory>
-#include <mutex>
-#include <atomic>
 #include <utility>
 #include <functional>
-#include <set>
 
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
@@ -178,28 +174,6 @@ public:
 	}
 };
 
-class id_interval 
-{
-public:
-	id_interval(int ll, int uu) : left_(ll), right_(uu) {}
-	bool operator < (const id_interval& ) const;
-	int left() const { return left_; }
-	int right() const {  return right_; }
-private:
-	int left_, right_;
-};
-
-class IdManager {
-public:
-	IdManager();
-	int allocateId();          // Allocates an id
-	void freeId(int id);       // Frees an id so it can be used again
-	bool markAsUsed(int id);   // Let's the user register an id. 
-private: 
-	typedef std::set<id_interval> id_intervals_t;
-	id_intervals_t free_;
-};
-
 /**
  * @brief Creates a new connection to an AMQP broker
  * using the supplied parameters.
@@ -226,11 +200,7 @@ struct Connection {
 		const std::string &vhost = "/", int frame_max = 131072);
 	~Connection();
 
-	std::mutex lock;
-	std::map<amqp_channel_t,class Channel*> pool;
 	amqp_connection_state_t state;
-	IdManager manager;
-	std::atomic<bool> listen{true};
 };
 
 /**
@@ -257,8 +227,6 @@ struct Channel {
 
 	amqp_channel_t id;
 	Connection *connection;
-	std::queue<amqp_envelope_t> envelopes;
-	bool is_basic_cancel = true;
 };
 
 /**
@@ -331,9 +299,6 @@ public:
 	/// Basic messaging pattern for publish events.
 	void publish(const Configuration &configuration, const std::string &messagebody);
 
-	/// RPC messaging pattern for asynchronous publish events.
-	void publish(const Configuration &configuration, const std::string &messagebody, std::function<void (const Response&)> callback);
-
 	/// RPC messaging pattern for publish events.
 	Response::Ptr publish(const Configuration &configuration, const std::string &messagebody, struct timeval *timeout);
 
@@ -342,9 +307,6 @@ public:
 
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
-
-protected:
-	Connection::Ptr m_connection;
 };
 
 } // end namespace gammasoft
