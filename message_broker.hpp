@@ -43,9 +43,10 @@ struct Configuration {
 /**
  * @brief An AMQP Message, extends amqp_message_t struct
  */
-class Message : public amqp_message_t
+class Message : protected amqp_message_t
 {
 public:
+    friend class Channel;
 	typedef std::shared_ptr<Message> Ptr;
 
 	Message() {
@@ -60,7 +61,6 @@ public:
 		body = amqp_bytes_malloc_dup(message.body);
 		properties = message.properties;
 		pool = message.pool;
-		from_copy = false;
 
 		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
 			switch (iter->second.flag & message.properties._flags) {
@@ -161,8 +161,6 @@ public:
 	}
 
 protected:
-	bool from_copy = true;
-
 	struct PropertyDescriptor {
 		amqp_flags_t flag;
 		void *ptr;
@@ -197,6 +195,8 @@ using Envelope = amqp_envelope_t;
 class Connection
 {
 public:
+	friend class Channel;
+
 	/**
 	 * @brief Establish an amqp connection by parameters used to connect to the RabbitMQ broker
 	 * 
@@ -215,9 +215,10 @@ public:
 		const std::string &password = "guest",
 		const std::string &vhost = "/", int frame_max = 131072);
 
-	~Connection();
+	virtual ~Connection();
 
-	amqp_connection_state_t state;
+protected:
+	amqp_connection_state_t m_state;
 };
 
 /**
@@ -227,8 +228,8 @@ public:
 class Channel
 {
 public:
-	Channel(Connection *connection);
-	~Channel();
+	Channel(Connection &connection);
+	virtual ~Channel();
 
 	std::tuple<std::string,std::string> setup(const Configuration &configration);
 	
@@ -244,14 +245,9 @@ public:
 
 	void reject(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
-	void stop_consuming() {
-		consumer_loop = false;
-	}
-
-private:
-	amqp_channel_t id;
-	Connection *connection;
-	bool consumer_loop;
+protected:
+	amqp_connection_state_t m_state;
+	amqp_channel_t m_id;
 };
 
 /**
@@ -340,7 +336,7 @@ public:
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
 
-private:
+protected:
 	std::string m_host;
 	int m_port;
 	std::string m_username;
