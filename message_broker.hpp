@@ -58,85 +58,83 @@ public:
 	}
 
 	Message(const amqp_message_t &message) {
-		body = amqp_bytes_malloc_dup(message.body);
-		properties = message.properties;
-		pool = message.pool;
-
-		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
-			switch (iter->second.flag & message.properties._flags) {
-			case AMQP_BASIC_CONTENT_TYPE_FLAG:
-				properties.content_type = amqp_bytes_malloc_dup(message.properties.content_type);
-				break;
-			case AMQP_BASIC_CONTENT_ENCODING_FLAG:
-				properties.content_encoding = amqp_bytes_malloc_dup(message.properties.content_encoding);
-				break;
-			case AMQP_BASIC_DELIVERY_MODE_FLAG:
-				properties.delivery_mode = message.properties.delivery_mode;
-				break;
-			case AMQP_BASIC_PRIORITY_FLAG:
-				properties.priority = message.properties.priority;
-				break;
-			case AMQP_BASIC_CORRELATION_ID_FLAG:
-				properties.correlation_id = amqp_bytes_malloc_dup(message.properties.correlation_id);
-				break;
-			case AMQP_BASIC_REPLY_TO_FLAG:
-				properties.reply_to = amqp_bytes_malloc_dup(message.properties.reply_to);
-				break;
-			case AMQP_BASIC_EXPIRATION_FLAG:
-				properties.expiration = amqp_bytes_malloc_dup(message.properties.expiration);
-				break;
-			case AMQP_BASIC_MESSAGE_ID_FLAG:
-				properties.message_id = amqp_bytes_malloc_dup(message.properties.message_id);
-				break;
-			case AMQP_BASIC_TIMESTAMP_FLAG:
-				properties.timestamp = message.properties.timestamp;
-				break;
-			case AMQP_BASIC_TYPE_FLAG:
-				properties.type = amqp_bytes_malloc_dup(message.properties.type);
-				break;
-			case AMQP_BASIC_USER_ID_FLAG:
-				properties.user_id = amqp_bytes_malloc_dup(message.properties.user_id);
-				break;
-			case AMQP_BASIC_APP_ID_FLAG:
-				properties.app_id = amqp_bytes_malloc_dup(message.properties.app_id);
-				break;
-			case AMQP_BASIC_CLUSTER_ID_FLAG:
-				properties.cluster_id = amqp_bytes_malloc_dup(message.properties.cluster_id);
-				break;
-			}
-		}
+		*this = message;
 	}
 
 	Message& operator=(const amqp_message_t & message) {
-		body = message.body;
-		properties = message.properties;
-		pool = message.pool;
+		if (this->body != message.body) {
+			this->body = amqp_bytes_malloc_dup(message.body);
+			this->properties = message.properties;
+			this->pool = message.pool;
+			
+			for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
+				switch (iter->second.flag & message.properties._flags) {
+				case AMQP_BASIC_CONTENT_TYPE_FLAG:
+					properties.content_type = amqp_bytes_malloc_dup(message.properties.content_type);
+					break;
+				case AMQP_BASIC_CONTENT_ENCODING_FLAG:
+					properties.content_encoding = amqp_bytes_malloc_dup(message.properties.content_encoding);
+					break;
+				case AMQP_BASIC_DELIVERY_MODE_FLAG:
+					properties.delivery_mode = message.properties.delivery_mode;
+					break;
+				case AMQP_BASIC_PRIORITY_FLAG:
+					properties.priority = message.properties.priority;
+					break;
+				case AMQP_BASIC_CORRELATION_ID_FLAG:
+					properties.correlation_id = amqp_bytes_malloc_dup(message.properties.correlation_id);
+					break;
+				case AMQP_BASIC_REPLY_TO_FLAG:
+					properties.reply_to = amqp_bytes_malloc_dup(message.properties.reply_to);
+					break;
+				case AMQP_BASIC_EXPIRATION_FLAG:
+					properties.expiration = amqp_bytes_malloc_dup(message.properties.expiration);
+					break;
+				case AMQP_BASIC_MESSAGE_ID_FLAG:
+					properties.message_id = amqp_bytes_malloc_dup(message.properties.message_id);
+					break;
+				case AMQP_BASIC_TIMESTAMP_FLAG:
+					properties.timestamp = message.properties.timestamp;
+					break;
+				case AMQP_BASIC_TYPE_FLAG:
+					properties.type = amqp_bytes_malloc_dup(message.properties.type);
+					break;
+				case AMQP_BASIC_USER_ID_FLAG:
+					properties.user_id = amqp_bytes_malloc_dup(message.properties.user_id);
+					break;
+				case AMQP_BASIC_APP_ID_FLAG:
+					properties.app_id = amqp_bytes_malloc_dup(message.properties.app_id);
+					break;
+				case AMQP_BASIC_CLUSTER_ID_FLAG:
+					properties.cluster_id = amqp_bytes_malloc_dup(message.properties.cluster_id);
+					break;
+				}
+			}
+		}
 		return *this;
 	}
 
 	~Message() {
 		// In rabbitmq-c amqp_destroy_message() frees memory associated 
 		// with a amqp_message_t allocated in amqp_read_message.
-		// Instead (if message was not "copied"), we manually delete fields depending on
-		// how object was created, due to in many case ~Envelope() implicitly
+		// Instead, we manually delete fields depending on
+		// how object was created, due to in many case amqp_destroy_envelope() implicitly
 		// calls amqp_destroy_message().
-		if (!from_copy) {
-			for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
-				// Skip non amqp_bytes_t types.
-				if (!(iter->second.flag & (
-					AMQP_BASIC_DELIVERY_MODE_FLAG |
-					AMQP_BASIC_PRIORITY_FLAG |
-					AMQP_BASIC_TIMESTAMP_FLAG))) {
-					amqp_bytes_t* ptr = reinterpret_cast<amqp_bytes_t*>(iter->second.ptr);
-					if (ptr->bytes) {
-						amqp_bytes_free(*ptr);
-					}
+		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
+			// Skip non amqp_bytes_t types.
+			if (!(iter->second.flag & (
+				AMQP_BASIC_DELIVERY_MODE_FLAG |
+				AMQP_BASIC_PRIORITY_FLAG |
+				AMQP_BASIC_TIMESTAMP_FLAG))) {
+				amqp_bytes_t* ptr = reinterpret_cast<amqp_bytes_t*>(iter->second.ptr);
+				if (ptr->bytes) {
+					amqp_bytes_free(*ptr);
 				}
 			}
-			// Skip this->pool as it is managed by rabbitmq-c internally.
-			if (body.bytes) {
-				amqp_bytes_free(body);
-			}
+		}
+		// Skip this->pool as it is managed by rabbitmq-c internally.
+		if (body.bytes) {
+			amqp_bytes_free(body);
 		}
 	}
 
