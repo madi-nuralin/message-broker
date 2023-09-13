@@ -8,27 +8,20 @@ using namespace gammasoft;
 int main(int argc, char const *argv[])
 {
 	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
+	
+	/*MessageBroker::Configuration configuration;
+	configuration.exchange.name = "hello";
+	configuration.exchange.type = "fanout";
+	configuration.exchange.declare = true;
 
-	broker.publish({
-			.queue = {
-				.name = "hello",
-				.declare = true
-			},
-			.routing_key = "hello",
-			.on_error = [](const auto& e) {
-				std::cerr << e << std::endl;
-			}
-		}, "hello"
-	);
+	broker.publish(configuration, "hello");*/
 
-	struct timeval timeout{5,0};
-	auto response = broker.publish({
-			.queue = {
-				.exclusive = true,
-				.declare = true
-			},
-			.routing_key = "rpc_queue",
-		}, "30", &timeout);
+	MessageBroker::Configuration configuration;
+	configuration.queue.exclusive = true;
+	configuration.queue.declare = true;
+	configuration.routing_key = "rpc_queue";
+	//struct timeval timeout{5,0};
+	auto response = broker.publish(configuration, "30", nullptr);
 
 	if (response->ok())
 	{

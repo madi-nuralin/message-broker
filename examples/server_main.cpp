@@ -58,34 +58,28 @@ int main(int argc, char const *argv[])
 //	InterruptHandler::hookSIGINT();
 	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 
-	broker.subscribe({
-			.queue = {
-				.name = "hello",
-				.declare = true
-			},
-			.on_error = [](const auto& e) {
-				std::cerr << e << std::endl;
-			}
-		}, [](const auto& message) {
-			std::cout << "[x] Received b'" << message.getBody() << "'" << std::endl;
-		}
-	);
+	/*MessageBroker::Configuration configuration;
+	configuration.exchange.name = "hello";
+	configuration.exchange.type = "fanout";
+	configuration.exchange.declare = true;
+	configuration.queue.name = "";
+	configuration.queue.exclusive = false;
+	configuration.queue.declare = true;
+	configuration.queue.bind = true;
 
-	broker.subscribe({
-			.queue = {
-				.name = "rpc_queue",
-				.declare = true
-			},
-			.on_error = [](const auto& e) {
-				std::cerr << e << std::endl;
-			}
-		}, [](const auto& request, auto& response){
-			auto number = std::stoi(request.getBody());
-			std::cout << "[.] fib(" <<  number << ")" << std::endl;
-			response.setBody(std::to_string(fib(number)));
-			return true;
-		}
-	);
+	broker.subscribe(configuration, [](const auto& message) {
+		std::cout << "[x] Received b'" << message.getBody() << "'" << std::endl;
+	});*/
+
+	MessageBroker::Configuration configuration;
+	configuration.queue.name = "rpc_queue";
+	configuration.queue.declare = true;
+	broker.subscribe(configuration, [](const auto& request, auto& response){
+		auto number = std::stoi(request.getBody());
+		std::cout << "[.] fib(" <<  number << ")" << std::endl;
+		response.setBody(std::to_string(fib(number)));
+		return true;
+	});
 
 //	InterruptHandler::waitForUserInterrupt();
 	while(1){}

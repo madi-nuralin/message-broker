@@ -13,7 +13,7 @@ link_libraries(${RBMQ_LIBRARIES} ${GLIB_LIBRARIES} ${JSON_GLIB_LIBRARIES})
 
 #configure_file(client_rbmq_config.h.in client_rbmq_config.h @ONLY)
 
-add_executable(client examples/client_main.cpp message_broker.cpp utils.cpp)
-add_executable(server examples/server_main.cpp message_broker.cpp utils.cpp)
+add_executable(client examples/client_main.cpp message_broker.cpp utils.cpp thread_pool.cpp)
+add_executable(server examples/server_main.cpp message_broker.cpp utils.cpp thread_pool.cpp)
 add_executable(server_rpc examples/server_rpc.cpp utils.cpp)
 add_executable(client_rpc examples/client_rpc.cpp utils.cpp)

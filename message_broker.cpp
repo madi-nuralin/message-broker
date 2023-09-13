@@ -3,6 +3,7 @@
 #include <glib.h>
 #include <stdexcept>
 #include <iostream>
+#include <thread>
 
 #include "message_broker.hpp"
 #include "utils.h"
@@ -22,12 +23,12 @@ Connection::Connection(
 	
 	amqp_socket_t *socket = amqp_tcp_socket_new(state);
 	if (!socket) {
-		die("creating TCP socket failed");
+		die("AMQP creating TCP socket failed");
 	}
 
 	int status = amqp_socket_open(socket, host.c_str(), port);
 	if (status) {
-		die("opening TCP socket on %s:%d failed", host.c_str(), port);
+		die("AMQP opening TCP socket on %s:%d failed", host.c_str(), port);
 	}
 
 	die_on_amqp_error(amqp_login(state, vhost.c_str(), 0, frame_max, 0, AMQP_SASL_METHOD_PLAIN,
@@ -38,22 +39,22 @@ Connection::Connection(
 Connection::~Connection()
 {
 	die_on_amqp_error(amqp_connection_close(state, AMQP_REPLY_SUCCESS),
-			"Closing connection");
-	die_on_error(amqp_destroy_connection(state), "Ending connection");
+			"connection.close");
+	die_on_error(amqp_destroy_connection(state), "connection.destroy");
 }
 
 Channel::Channel(Connection *connection) : id(1), connection(connection)
 {
 	amqp_channel_open(connection->state, id);
 	die_on_amqp_error(amqp_get_rpc_reply(connection->state),
-			"Opening channel");
+			"channel.open");
 }
 
 Channel::~Channel()
 {
 	die_on_amqp_error(
 		amqp_channel_close(connection->state, id, AMQP_REPLY_SUCCESS),
-			"Closing channel");
+			"channel.close");
 }
 
 std::tuple<std::string, std::string> Channel::setup(const Configuration& configuration)
@@ -81,7 +82,7 @@ std::tuple<std::string, std::string> Channel::setup(const Configuration& configu
 			amqp_empty_table);
 
 		die_on_amqp_error(
-			amqp_get_rpc_reply(connection->state), "Declaring exchange");
+			amqp_get_rpc_reply(connection->state), "exchange.declare");
 
 		exchange = configuration.exchange.name;
 	}
@@ -101,7 +102,7 @@ std::tuple<std::string, std::string> Channel::setup(const Configuration& configu
 				amqp_empty_table);
 
 		die_on_amqp_error(
-			amqp_get_rpc_reply(connection->state), "Declaring queue");
+			amqp_get_rpc_reply(connection->state), "queue.declare");
 
 		queue = std::string((char*)r->queue.bytes, r->queue.len);
 	}
@@ -122,7 +123,7 @@ std::tuple<std::string, std::string> Channel::setup(const Configuration& configu
 			amqp_empty_table);
 
 		die_on_amqp_error(
-			amqp_get_rpc_reply(connection->state), "Binding queue");
+			amqp_get_rpc_reply(connection->state), "queue.bind");
 	}
 
 	return std::make_tuple(exchange, queue);
@@ -147,7 +148,7 @@ void Channel::publish(const std::string &exchange, const std::string &routing_ke
 		"basic.publish");
 }
 
-void Channel::consume(const std::string &queue_name, struct timeval *timeout, std::function<void(const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
+void Channel::consume(const std::string &queue_name, struct timeval *tv, std::function<void(const Envelope &)> callback, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 {
 	amqp_basic_consume(
 		connection->state,
@@ -164,21 +165,23 @@ void Channel::consume(const std::string &queue_name, struct timeval *timeout, st
 		amqp_empty_table);
 
 	die_on_amqp_error(
-		amqp_get_rpc_reply(connection->state), "Consuming");
+		amqp_get_rpc_reply(connection->state), "basic.consume");
 
-	for (;;) {
+	consumer_loop = true;
+	while (consumer_loop) {
 		amqp_rpc_reply_t res;
 		amqp_envelope_t envelope;
 
-		amqp_maybe_release_buffers(state);
-
-		res = amqp_consume_message(state, &envelope, &tv, 0);
+		amqp_maybe_release_buffers(connection->state);
+		res = amqp_consume_message(connection->state, &envelope, tv, 0);
 
 		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
 			continue;
 		}
 
 		callback(envelope);
+
+		amqp_destroy_envelope(&envelope);
 	}
 }
 
@@ -263,7 +266,7 @@ MessageBroker::MessageBroker(
 	char *p = strdup(url.c_str());
 
 	die_on_error(
-		amqp_parse_url(p, &ci), "Parse URL");
+		amqp_parse_url(p, &ci), "parse.url");
 
 	m_host = ci.host;
 	m_port = ci.port;
@@ -273,6 +276,10 @@ MessageBroker::MessageBroker(
 	m_frame_max = frame_max;
 
 	free(p);
+}
+
+MessageBroker::~MessageBroker()
+{
 }
 
 void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
@@ -308,9 +315,9 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 	Response::Ptr response;
 
 	channel.publish(exchange, configuration.routing_key, request);
-	channel.consume(reply_to, timeout, [&](const auto& envelope){
+	channel.consume(reply_to, timeout, [&](const auto& envelope) {
 		response = std::make_shared<Response>(envelope.message);
-		channel.close();
+		channel.stop_consuming();
 	});
 
 	return response;
@@ -318,23 +325,15 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 
 void MessageBroker::subscribe(const Configuration &configuration, std::function<void (const Message&)> callback)
 {
-	std::thread worker([=](){
-		try {
-			Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
-			Channel channel(&connection);
+	std::thread worker([this, configuration, callback](){
+		Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
+		Channel channel(&connection);
 
-			auto[exchange, queue] = channel.setup(configuration);
+		auto[exchange, queue] = channel.setup(configuration);
 
-			channel.consume(queue, nullptr, [&](auto& channel, const auto& envelope) {
-				callback(envelope.message);
-			});
-		} catch (const std::runtime_error& e) {
-			if (configuration.on_error) {
-				configuration.on_error(e.what());
-				return;
-			}
-			std::cout << e.what() << std::endl;
-		}
+		channel.consume(queue, nullptr, [&](const auto& envelope) {
+			callback(envelope.message);
+		});
 	});
 
 	worker.detach();
@@ -342,36 +341,28 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 
 void MessageBroker::subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback)
 {
-	std::thread worker([=](){
-		try {
-			Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
-			Channel channel(m_connection.get());
+	std::thread worker([this, configuration, callback](){
+		Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
+		Channel channel(&connection);
 
-			auto[exchange, queue] = channel.setup(configuration);
+		auto[exchange, queue] = channel.setup(configuration);
 
-			channel.consume(queue, nullptr, [&callback](auto& channel, const auto& envelope){
-				Request request(envelope.message);
-				Response response;
+		channel.consume(queue, nullptr, [&](const auto& envelope){
+			Request request(envelope.message);
+			Response response;
 
-				auto ok = callback(request, response);
+			auto ok = callback(request, response);
 
-				std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
-				std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
+			std::string reply_to((char*)envelope.message.properties.reply_to.bytes, envelope.message.properties.reply_to.len);
+			std::string correlation_id((char*)envelope.message.properties.correlation_id.bytes, envelope.message.properties.correlation_id.len);
 
-				response.setProperty("Content-Type", "application/json");
-				response.setProperty("Correlation-Id", correlation_id.c_str());
-				response.setProperty("Delivery-Mode", (uint8_t)2);
-				response.setProperty("Type", ok ? "response" : "error");
+			response.setProperty("Content-Type", "application/json");
+			response.setProperty("Correlation-Id", correlation_id.c_str());
+			response.setProperty("Delivery-Mode", (uint8_t)2);
+			response.setProperty("Type", ok ? "response" : "error");
 
-				channel.publish("", reply_to, response);
-			});
-		} catch (const std::runtime_error &e) {
-			if (configuration.on_error) {
-				configuration.on_error(e.what());
-				return;
-			}
-			std::cout << e.what() << std::endl;
-		}
+			channel.publish("", reply_to, response);
+		});
 	});
 
 	worker.detach();

@@ -3,9 +3,9 @@
 
 #include <map>
 #include <string>
-#include <memory>
 #include <utility>
 #include <functional>
+#include <memory>
 
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
@@ -16,125 +16,159 @@ namespace amqp {
 
 /**
  * @brief Class for specifying the RabbitMQ queue and exchange
- * parameters, like declaration, binding and etc.
- * @note While making changes, ensure that the class
- * must be an aggregate type that has:
- *   -no user-declared constructors
- *   -no user-provided, inherited, or explicit constructors
- *   -no user-declared or inherited constructors
- *   -no private or protected direct non-static data members no base classes
- *   -no virtual base classes
- *   -no private or protected direct base classes
- *   -no virtual member functions
- *   -no default member initializers
- * in order to be compliant with "designated initialization".
+ * parameters, i.e. "queue_declare", "queue_bind".
  */
 struct Configuration {
 	struct {
-		std::string name;
-		std::string type;
-		bool passive;
-		bool durable;
-		bool auto_delete;
-		bool internal;
-		bool declare;
+		std::string name = "";
+		std::string type = "";
+		bool passive = false;
+		bool durable = false;
+		bool auto_delete = false;
+		bool internal = false;
+		bool declare = false;
 	} exchange;
 	struct {
-		std::string name;
-		bool passive;
-		bool durable;
-		bool auto_delete;
-		bool exclusive;
-		bool declare;
-		bool bind;
+		std::string name = "";
+		bool passive = false;
+		bool durable = false;
+		bool auto_delete = false;
+		bool exclusive = false;
+		bool declare = false;
+		bool bind = false;
 	} queue;
-	std::string routing_key;
-	std::function<void (const std::string&)> on_error;
+	std::string routing_key = "";
 };
 
 /**
  * @brief An AMQP Message, extends amqp_message_t struct
  */
-class Message : public amqp_message_t {
+class Message : public amqp_message_t
+{
 public:
 	typedef std::shared_ptr<Message> Ptr;
 
 	Message() {
-		this->properties._flags = 0;
+		properties._flags = 0;
 	}
 
-	Message(const std::string &body) {
-		this->properties._flags = 0;
+	Message(const std::string &body) : Message() {
 		this->body = amqp_bytes_malloc_dup(amqp_cstring_bytes(body.c_str()));
 	}
 
 	Message(const amqp_message_t &message) {
-		this->body = amqp_bytes_malloc_dup(message.body);
-		this->properties._flags = message.properties._flags;
-		this->properties.content_encoding = amqp_bytes_malloc_dup(message.properties.content_encoding);
-		this->properties.type = amqp_bytes_malloc_dup(message.properties.type);
-		this->pool = message.pool;
-		this->destroy = true;
+		body = amqp_bytes_malloc_dup(message.body);
+		properties = message.properties;
+		pool = message.pool;
+		from_copy = false;
+
+		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
+			switch (iter->second.flag & message.properties._flags) {
+			case AMQP_BASIC_CONTENT_TYPE_FLAG:
+				properties.content_type = amqp_bytes_malloc_dup(message.properties.content_type);
+				break;
+			case AMQP_BASIC_CONTENT_ENCODING_FLAG:
+				properties.content_encoding = amqp_bytes_malloc_dup(message.properties.content_encoding);
+				break;
+			case AMQP_BASIC_DELIVERY_MODE_FLAG:
+				properties.delivery_mode = message.properties.delivery_mode;
+				break;
+			case AMQP_BASIC_PRIORITY_FLAG:
+				properties.priority = message.properties.priority;
+				break;
+			case AMQP_BASIC_CORRELATION_ID_FLAG:
+				properties.correlation_id = amqp_bytes_malloc_dup(message.properties.correlation_id);
+				break;
+			case AMQP_BASIC_REPLY_TO_FLAG:
+				properties.reply_to = amqp_bytes_malloc_dup(message.properties.reply_to);
+				break;
+			case AMQP_BASIC_EXPIRATION_FLAG:
+				properties.expiration = amqp_bytes_malloc_dup(message.properties.expiration);
+				break;
+			case AMQP_BASIC_MESSAGE_ID_FLAG:
+				properties.message_id = amqp_bytes_malloc_dup(message.properties.message_id);
+				break;
+			case AMQP_BASIC_TIMESTAMP_FLAG:
+				properties.timestamp = message.properties.timestamp;
+				break;
+			case AMQP_BASIC_TYPE_FLAG:
+				properties.type = amqp_bytes_malloc_dup(message.properties.type);
+				break;
+			case AMQP_BASIC_USER_ID_FLAG:
+				properties.user_id = amqp_bytes_malloc_dup(message.properties.user_id);
+				break;
+			case AMQP_BASIC_APP_ID_FLAG:
+				properties.app_id = amqp_bytes_malloc_dup(message.properties.app_id);
+				break;
+			case AMQP_BASIC_CLUSTER_ID_FLAG:
+				properties.cluster_id = amqp_bytes_malloc_dup(message.properties.cluster_id);
+				break;
+			}
+		}
 	}
 
 	Message& operator=(const amqp_message_t & message) {
-		this->body = message.body;
-		this->properties = message.properties;
-		this->pool = message.pool;
+		body = message.body;
+		properties = message.properties;
+		pool = message.pool;
 		return *this;
 	}
 
 	~Message() {
 		// In rabbitmq-c amqp_destroy_message() frees memory associated 
 		// with a amqp_message_t allocated in amqp_read_message.
-		// Instead, we manually delete fields depending on
+		// Instead (if message was not "copied"), we manually delete fields depending on
 		// how object was created, due to in many case ~Envelope() implicitly
 		// calls amqp_destroy_message().
-		if (this->destroy) {
-			if (this->properties.content_encoding.bytes) {
-				amqp_bytes_free(this->properties.content_encoding);
+		if (!from_copy) {
+			for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
+				// Skip non amqp_bytes_t types.
+				if (!(iter->second.flag & (
+					AMQP_BASIC_DELIVERY_MODE_FLAG |
+					AMQP_BASIC_PRIORITY_FLAG |
+					AMQP_BASIC_TIMESTAMP_FLAG))) {
+					amqp_bytes_t* ptr = reinterpret_cast<amqp_bytes_t*>(iter->second.ptr);
+					if (ptr->bytes) {
+						amqp_bytes_free(*ptr);
+					}
+				}
 			}
-			if (this->properties.type.bytes) {
-				amqp_bytes_free(this->properties.type);
-			}
-			if (this->body.bytes) {
-				amqp_bytes_free(this->body);
+			// Skip this->pool as it is managed by rabbitmq-c internally.
+			if (body.bytes) {
+				amqp_bytes_free(body);
 			}
 		}
 	}
 
 	void setProperty(const std::string & key, const char *value) {
-		*reinterpret_cast<amqp_bytes_t*>(schema[key].ptr) = amqp_cstring_bytes(value);
-		this->properties._flags |= schema[key].flag;
+		*reinterpret_cast<amqp_bytes_t*>(propertyMap[key].ptr) = amqp_cstring_bytes(value);
+		properties._flags |= propertyMap[key].flag;
 	}
-
 	void setProperty(const std::string & key, uint8_t value) {
-		*reinterpret_cast<uint8_t*>(schema[key].ptr) = value;
-		this->properties._flags |= schema[key].flag;
+		*reinterpret_cast<uint8_t*>(propertyMap[key].ptr) = value;
+		properties._flags |= propertyMap[key].flag;
 	}
-
 	void setProperty(const std::string & key, uint64_t value) {
-		*reinterpret_cast<uint64_t*>(schema[key].ptr) = value;
-		this->properties._flags |= schema[key].flag;
+		*reinterpret_cast<uint64_t*>(propertyMap[key].ptr) = value;
+		properties._flags |= propertyMap[key].flag;
 	}
 
 	void setBody(const std::string & body) {
 		this->body = amqp_bytes_malloc_dup(amqp_cstring_bytes(body.c_str()));
 	}
-
 	std::string getBody() const {
-		return std::string((char *)this->body.bytes, (int)this->body.len);
+		return std::string((char *)body.bytes, (int)body.len);
 	}
 
 protected:
-	bool destroy = false;
+	bool from_copy = true;
 
 	struct PropertyDescriptor {
 		amqp_flags_t flag;
 		void *ptr;
 	};
 
-	std::map<std::string, PropertyDescriptor> schema {
+	std::map<std::string, PropertyDescriptor> propertyMap {
 		{"Content-Type", PropertyDescriptor{AMQP_BASIC_CONTENT_TYPE_FLAG, &properties.content_type}},
 		{"Content-Encoding", PropertyDescriptor{AMQP_BASIC_CONTENT_ENCODING_FLAG, &properties.content_encoding}},
 		{"Delivery-Mode", PropertyDescriptor{AMQP_BASIC_DELIVERY_MODE_FLAG, &properties.delivery_mode}},
@@ -152,35 +186,17 @@ protected:
 };
 
 /**
- * @brief A "message envelope" object containing the message body 
- * and delivery metadata, extends amqp_envelope_t struct.
+ * @brief A "message envelope" object containing the message body and delivery metadata.
  */
-class Envelope : public amqp_envelope_t {
-public:
-	Envelope(const amqp_envelope_t &envelope) {
-		// a shallow copy of amqp_envelope_t
-		this->channel = envelope.channel;
-		this->message = envelope.message;
-		this->routing_key = envelope.routing_key;
-		this->exchange = envelope.exchange;
-		this->consumer_tag = envelope.consumer_tag;
-	}
-
-	~Envelope() {
-		// envelope a pointer to a amqp_envelope_t object. Caller
-		// should call #amqp_destroy_envelope() when it is done using
-		// the fields in the envelope object.
-		amqp_destroy_envelope(this);
-	}
-};
+using Envelope = amqp_envelope_t;
 
 /**
  * @brief Creates a new connection to an AMQP broker
  * using the supplied parameters.
  */
-struct Connection {
-	typedef std::shared_ptr<Connection> Ptr;
-
+class Connection
+{
+public:
 	/**
 	 * @brief Establish an amqp connection by parameters used to connect to the RabbitMQ broker
 	 * 
@@ -198,6 +214,7 @@ struct Connection {
 		const std::string &username = "guest",
 		const std::string &password = "guest",
 		const std::string &vhost = "/", int frame_max = 131072);
+
 	~Connection();
 
 	amqp_connection_state_t state;
@@ -207,7 +224,9 @@ struct Connection {
  * @brief A single channel multiplexed in an AMQP connection.
  * Represents a logical AMQP channel multiplexed over a connection
  */
-struct Channel {
+class Channel
+{
+public:
 	Channel(Connection *connection);
 	~Channel();
 
@@ -215,7 +234,7 @@ struct Channel {
 	
 	void publish(const std::string &exchange, const std::string &routing_key, const Message &message, bool mandatory = false, bool immediate = false);
 
-	void consume(const std::string &queue_name, struct timeval *timeout, std::function<void(Channel &, const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
+	void consume(const std::string &queue_name, struct timeval *timeout, std::function<void(const Envelope &)>, const std::string &consumer_tag = "", bool no_local = false, bool no_ack = true, bool exclusive = false);
 
 	void cancel(const std::string &consumer_tag);
 
@@ -225,26 +244,37 @@ struct Channel {
 
 	void reject(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
+	void stop_consuming() {
+		consumer_loop = false;
+	}
+
+private:
 	amqp_channel_t id;
 	Connection *connection;
+	bool consumer_loop;
 };
 
 /**
  * @brief An AMQP message class intended for a "Request/Reply" pattern.
  * Use to build an RPC system: a client and a scalable RPC server. 
  */
-class Request : public Message {
-	using Message::Message;
-};
-
-/**
- * @brief An AMQP message class intended for a "Request/Reply" pattern.
- * Use to build an RPC system: a client and a scalable RPC server. 
- */
-class Response : public Message {
-	using Message::Message;
+class Request : public Message
+{
 public:
+	using Message::Message;
+};
+
+/**
+ * @brief An AMQP message class intended for a "Request/Reply" pattern.
+ * Use to build an RPC system: a client and a scalable RPC server. 
+ */
+class Response : public Message
+{
+public:
+	using Message::Message;
+
 	typedef std::shared_ptr<Response> Ptr;
+
 	bool ok() const {
 		return std::string((char*)this->properties.type.bytes,
 			this->properties.type.len) != "error";
@@ -253,17 +283,18 @@ public:
 
 } // end namespace amqp
 
-class MessageBroker {
+class MessageBroker
+{
 public:
 	typedef std::shared_ptr<MessageBroker> Ptr;
 
-	using Connection    = amqp::Connection;
-	using Channel       = amqp::Channel;
+	using Connection = amqp::Connection;
+	using Channel = amqp::Channel;
 	using Configuration = amqp::Configuration;
-	using Envelope      = amqp::Envelope;
-	using Message       = amqp::Message;
-	using Request       = amqp::Request;
-	using Response      = amqp::Response;
+	using Envelope = amqp::Envelope;
+	using Message = amqp::Message;
+	using Request = amqp::Request;
+	using Response = amqp::Response;
 
 	/**
 	 * @brief Parse a connection URL and establish an amqp connection.
@@ -294,6 +325,7 @@ public:
 		const std::string &username,
 		const std::string &password,
 		const std::string &vhost, int frame_max = 131072);
+
 	virtual ~MessageBroker();
 
 	/// Basic messaging pattern for publish events.
@@ -307,13 +339,14 @@ public:
 
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
+
 private:
 	std::string m_host;
 	int m_port;
 	std::string m_username;
 	std::string m_password;
 	std::string m_vhost;
-	int v_frame_max;
+	int m_frame_max;
 };
 
 } // end namespace gammasoft
