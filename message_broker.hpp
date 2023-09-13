@@ -46,8 +46,9 @@ struct Configuration {
 class Message : protected amqp_message_t
 {
 public:
-    friend class Channel;
 	typedef std::shared_ptr<Message> Ptr;
+
+	friend class Channel;
 
 	Message() {
 		properties._flags = 0;
@@ -216,7 +217,7 @@ public:
 	virtual ~Connection();
 
 protected:
-	amqp_connection_state_t m_state;
+        std::unique_ptr<class ConnectionImpl> m_impl;
 };
 
 /**
@@ -244,8 +245,7 @@ public:
 	void reject(uint64_t delivery_tag, bool multiple = false, bool requeue = false);
 
 protected:
-	amqp_connection_state_t m_state;
-	amqp_channel_t m_id;
+	std::unique_ptr<class ChannelImpl> m_impl;
 };
 
 /**
