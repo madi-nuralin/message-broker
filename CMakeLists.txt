@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(client-rbmq VERSION 1.0)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(RBMQ REQUIRED librabbitmq>=0.10.0)
+pkg_check_modules(RBMQ REQUIRED librabbitmq>=0.13.0)
 #pkg_check_modules(GLIB REQUIRED glib-2.0>=0.29.2)
 #pkg_check_modules(JSON_GLIB REQUIRED json-glib-1.0)
 
