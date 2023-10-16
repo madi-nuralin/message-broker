@@ -1,39 +1,41 @@
 *message-broker*
+*1) Basic Messaging pattern*
 
-*Request/Response pattern*:
+
+
+*2) Request/Response pattern*:
 
 Publisher:
 ```cpp
-	MessageBroker::Configuration config;
-	config.queue.exclusive = true;
-	config.queue.declare = true;
-	config.routing_key = "rpc_queue";
+MessageBroker broker;
+MessageBroker::Configuration c1;
 
-	struct timeout tv = {5,0};
+c1.queue.exclusive = true;
+c1.queue.declare = true;
+c1.routing_key = "rpc_queue";
 
-	auto response = broker.publish(config, "30", &tv);
+struct timeout tv = {5,0};
 
-	if (response->ok())
-	{
-		std::cout << "[.] Got  fib(" << 30 << ") = " <<  response->getBody() << std::endl;
-	}
+auto response = broker.publish(c1, "30", &tv);
+
+if (response->ok())
+{
+	std::cout << "[.] Got  fib(" << 30 << ") = " <<  response->getBody() << std::endl;
+}
 ```
 
 Subscriber:
 ```cpp
-broker.subscribe({
-    .queue = {
-      .name = "rpc_queue",
-      .declare = true
-    },
-    .on_error = [](const auto &e) {
-        std::cerr << error << std::endl;
-    }
-  }, [](const auto& request, auto& response){
-    auto number = std::stoi(request.getBody());
-    std::cout << "[.] fib(" <<  number << ")" << std::endl;
-    response.setBody(std::to_string(fib(number)));
-    return true;
-  }
-);
+MessageBroker broker;
+MessageBroker::Configuration c2;
+
+c2.queue.name = "rpc_queue";
+c2.queue.declare = true;
+
+broker.subscribe(c2, [](const auto& request, auto& response){
+	auto number = std::stoi(request.getBody());
+	std::cout << "[.] fib(" <<  number << ")" << std::endl;
+	response.setBody(std::to_string(fib(number)));
+	return true;
+});
 ```
