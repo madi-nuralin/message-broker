@@ -1,6 +1,10 @@
-*message-broker*
+# message-broker
 
-*1) Basic Messaging pattern*
+A simple wrapper on rabbitmq-c (0.13>=). 
+
+## 1) Basic Messaging pattern
+
+Publisher:
 ```cpp
 MessageBroker broker;
 MessageBroker::Configuration c1;
@@ -32,7 +36,7 @@ broker.subscribe(configuration, [](const auto& message) {
 ```
 
 
-*2) Request/Response pattern*:
+## 2) Request/Response pattern
 
 Publisher:
 ```cpp
