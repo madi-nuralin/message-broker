@@ -2,24 +2,24 @@
 
 *Request/Response pattern*:
 
-Client:
+Publisher:
 ```cpp
-broker.publish({
-    .queue = {
-        .exclusive = true,
-        .declare = true
-    },
-    .routing_key = "rpc_queue",
-    .on_error = [](const auto &error) {
-        std::cerr << error << std::endl;
-    }
-  }, number, [&](const auto& response) {
-    std::cout << "[.] Got  fib(" << number << ") = " <<  response.getBody() << std::endl;
-  }
-);
+	MessageBroker::Configuration config;
+	config.queue.exclusive = true;
+	config.queue.declare = true;
+	config.routing_key = "rpc_queue";
+
+	struct timeout tv = {5,0};
+
+	auto response = broker.publish(config, "30", &tv);
+
+	if (response->ok())
+	{
+		std::cout << "[.] Got  fib(" << 30 << ") = " <<  response->getBody() << std::endl;
+	}
 ```
 
-Server:
+Subscriber:
 ```cpp
 broker.subscribe({
     .queue = {
