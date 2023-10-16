@@ -1,10 +1,10 @@
 #include <iostream>
-#include "../message_broker.hpp"
-
-/*#include <condition_variable>
+#include <condition_variable>
 #include <mutex>
 #include <iostream>
 #include <signal.h>
+
+#include "../message_broker.hpp"
 
 static std::condition_variable _condition;
 static std::mutex _mutex;
@@ -37,28 +37,16 @@ static std::mutex _mutex;
             std::cout << "Signal requests to exit" << std::endl;
         }
     };
-*/
-using namespace gammasoft;
 
-int fib(int n)
-{
-    switch (n)
-    {
-    case 0:
-        return 0;
-    case 1:
-        return 1;
-    default:
-        return fib(n - 1) + fib(n - 2);
-    }
-}
+using namespace gammasoft;
 
 int main(int argc, char const *argv[])
 {
-//	InterruptHandler::hookSIGINT();
-	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
+	InterruptHandler::hookSIGINT();
 
-	/*MessageBroker::Configuration configuration;
+	MessageBroker broker("amqp://guest:guest@localhost:5672");
+	MessageBroker::Configuration configuration;
+
 	configuration.exchange.name = "hello";
 	configuration.exchange.type = "fanout";
 	configuration.exchange.declare = true;
@@ -69,19 +57,9 @@ int main(int argc, char const *argv[])
 
 	broker.subscribe(configuration, [](const auto& message) {
 		std::cout << "[x] Received b'" << message.getBody() << "'" << std::endl;
-	});*/
-
-	MessageBroker::Configuration configuration;
-	configuration.queue.name = "rpc_queue";
-	configuration.queue.declare = true;
-	broker.subscribe(configuration, [](const auto& request, auto& response){
-		auto number = std::stoi(request.getBody());
-		std::cout << "[.] fib(" <<  number << ")" << std::endl;
-		response.setBody(std::to_string(fib(number)));
-		return true;
 	});
 
-//	InterruptHandler::waitForUserInterrupt();
-	while(1){}
+	InterruptHandler::waitForUserInterrupt();
+
 	return 0;
 }
