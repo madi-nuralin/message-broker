@@ -1,4 +1,5 @@
 #include <iostream>
+
 #include "../message_broker.hpp"
 
 using namespace gammasoft;
