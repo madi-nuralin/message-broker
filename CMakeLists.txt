@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(client-rbmq VERSION 1.0)
+project(message-broker VERSION 1.0)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(RBMQ REQUIRED librabbitmq>=0.13.0)
