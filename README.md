@@ -1,6 +1,7 @@
 # message-broker
 
-A simple wrapper on rabbitmq-c (0.13>=). 
+A simple wrapper on rabbitmq-c (0.13>=).
+See examples and https://www.rabbitmq.com/getstarted.html for quick start.
 
 ## 1) Basic Messaging pattern
 
