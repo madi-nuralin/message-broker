@@ -48,7 +48,7 @@ c.queue.exclusive = true;
 c.queue.declare = true;
 c.routing_key = "rpc_queue";
 
-struct timeout tv = {5,0};
+struct timeval tv = {5,0};
 
 auto response = broker.publish(c, "30", &tv);
 
