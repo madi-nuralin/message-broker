@@ -6,11 +6,14 @@
 #include <utility>
 #include <functional>
 #include <memory>
+#include <thread>
+#include <vector>
+#include <atomic>
 
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
 
-namespace gammasoft {
+namespace soft {
 
 namespace amqp {
 
@@ -70,7 +73,7 @@ public:
 		this->pool = message.pool;
 		
 		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
-			switch (iter->second.flag & message.properties._flags) {
+			switch (iter->second.first & message.properties._flags) {
 			case AMQP_BASIC_CONTENT_TYPE_FLAG:
 				properties.content_type = amqp_bytes_malloc_dup(message.properties.content_type);
 				break;
@@ -124,13 +127,13 @@ public:
 		// how object was created, due to in many case amqp_destroy_envelope() implicitly
 		// calls amqp_destroy_message().
 		for (auto iter = propertyMap.begin(); iter != propertyMap.end(); iter++) {
-			if (iter->second.flag & properties._flags) {
+			if (iter->second.first & properties._flags) {
 				// Skip non amqp_bytes_t properties.
-				if (!(iter->second.flag & (
-					AMQP_BASIC_DELIVERY_MODE_FLAG |
-					AMQP_BASIC_PRIORITY_FLAG |
-					AMQP_BASIC_TIMESTAMP_FLAG))) {
-					amqp_bytes_t* ptr = reinterpret_cast<amqp_bytes_t*>(iter->second.ptr);
+				if (!(iter->second.first & (AMQP_BASIC_DELIVERY_MODE_FLAG |
+				                            AMQP_BASIC_PRIORITY_FLAG |
+				                            AMQP_BASIC_TIMESTAMP_FLAG)))
+				{
+					amqp_bytes_t* ptr = reinterpret_cast<amqp_bytes_t*>(iter->second.second);
 					if (ptr->bytes) {
 						amqp_bytes_free(*ptr);
 					}
@@ -145,37 +148,37 @@ public:
 
 	inline void setProperty(const std::string & key, const char *value)
 	{
-		if (propertyMap.find(key) == propertyMap.end()) return;
-		if (!(propertyMap[key].flag & (
-			AMQP_BASIC_DELIVERY_MODE_FLAG |
-			AMQP_BASIC_PRIORITY_FLAG |
-			AMQP_BASIC_TIMESTAMP_FLAG))) {
-			*reinterpret_cast<amqp_bytes_t*>(propertyMap[key].ptr) = amqp_bytes_malloc_dup(amqp_cstring_bytes(value));
-			properties._flags |= propertyMap[key].flag;
+		if (propertyMap.find(key) == propertyMap.end()) {
+			return;
+		}
+		if (!(propertyMap[key].first & (AMQP_BASIC_DELIVERY_MODE_FLAG |
+		                                AMQP_BASIC_PRIORITY_FLAG |
+		                                AMQP_BASIC_TIMESTAMP_FLAG)))
+		{
+			*reinterpret_cast<amqp_bytes_t*>(propertyMap[key].second) = amqp_bytes_malloc_dup(amqp_cstring_bytes(value));
+			properties._flags |= propertyMap[key].first;
 		}
 	}
 
 	inline void setProperty(const std::string & key, uint8_t value)
 	{
-		if (propertyMap.find(key) == propertyMap.end()) return;
-		if (propertyMap[key].flag & (
-			AMQP_BASIC_DELIVERY_MODE_FLAG |
-			AMQP_BASIC_PRIORITY_FLAG |
-			AMQP_BASIC_TIMESTAMP_FLAG)) {
-			*reinterpret_cast<uint8_t*>(propertyMap[key].ptr) = value;
-			properties._flags |= propertyMap[key].flag;
+		if (propertyMap.find(key) == propertyMap.end()) {
+			return;
+		}
+		if (propertyMap[key].first & (AMQP_BASIC_DELIVERY_MODE_FLAG | AMQP_BASIC_PRIORITY_FLAG)) {
+			*reinterpret_cast<uint8_t*>(propertyMap[key].second) = value;
+			properties._flags |= propertyMap[key].first;
 		}
 	}
 
 	inline void setProperty(const std::string & key, uint64_t value)
 	{
-		if (propertyMap.find(key) == propertyMap.end()) return;
-		if (propertyMap[key].flag & (
-			AMQP_BASIC_DELIVERY_MODE_FLAG |
-			AMQP_BASIC_PRIORITY_FLAG |
-			AMQP_BASIC_TIMESTAMP_FLAG)) {
-			*reinterpret_cast<uint64_t*>(propertyMap[key].ptr) = value;
-			properties._flags |= propertyMap[key].flag;
+		if (propertyMap.find(key) == propertyMap.end()) {
+			return;
+		}
+		if (propertyMap[key].first & AMQP_BASIC_TIMESTAMP_FLAG) {
+			*reinterpret_cast<uint64_t*>(propertyMap[key].second) = value;
+			properties._flags |= propertyMap[key].first;
 		}
 	}
 
@@ -192,30 +195,40 @@ public:
 	friend class ChannelImpl;
 
 protected:
-	struct PropertyDescriptor {
-		amqp_flags_t flag;
-		void *ptr;
-	};
-
-	std::map<std::string, PropertyDescriptor> propertyMap {
-		{"Content-Type", PropertyDescriptor{AMQP_BASIC_CONTENT_TYPE_FLAG, &properties.content_type}},
-		{"Content-Encoding", PropertyDescriptor{AMQP_BASIC_CONTENT_ENCODING_FLAG, &properties.content_encoding}},
-		{"Delivery-Mode", PropertyDescriptor{AMQP_BASIC_DELIVERY_MODE_FLAG, &properties.delivery_mode}},
-		{"Priority", PropertyDescriptor{AMQP_BASIC_PRIORITY_FLAG, &properties.priority}},
-		{"Correlation-Id", PropertyDescriptor{AMQP_BASIC_CORRELATION_ID_FLAG, &properties.correlation_id}},
-		{"Reply-To", PropertyDescriptor{AMQP_BASIC_REPLY_TO_FLAG, &properties.reply_to}},
-		{"Expiration", PropertyDescriptor{AMQP_BASIC_EXPIRATION_FLAG, &properties.expiration}},
-		{"Message-Id", PropertyDescriptor{AMQP_BASIC_MESSAGE_ID_FLAG, &properties.message_id}},
-		{"Timestamp", PropertyDescriptor{AMQP_BASIC_TIMESTAMP_FLAG, &properties.timestamp}},
-		{"Type", PropertyDescriptor{AMQP_BASIC_TYPE_FLAG, &properties.type}},
-		{"User-Id", PropertyDescriptor{AMQP_BASIC_USER_ID_FLAG, &properties.user_id}},
-		{"App-Id", PropertyDescriptor{AMQP_BASIC_APP_ID_FLAG, &properties.app_id}},
-		{"Cluster-Id", PropertyDescriptor{AMQP_BASIC_CLUSTER_ID_FLAG, &properties.cluster_id}}
+	std::map<std::string, std::pair<amqp_flags_t, void*>> propertyMap {
+		{"Content-Type", {AMQP_BASIC_CONTENT_TYPE_FLAG, &properties.content_type}},
+		{"Content-Encoding", {AMQP_BASIC_CONTENT_ENCODING_FLAG, &properties.content_encoding}},
+		{"Delivery-Mode", {AMQP_BASIC_DELIVERY_MODE_FLAG, &properties.delivery_mode}},
+		{"Priority", {AMQP_BASIC_PRIORITY_FLAG, &properties.priority}},
+		{"Correlation-Id", {AMQP_BASIC_CORRELATION_ID_FLAG, &properties.correlation_id}},
+		{"Reply-To", {AMQP_BASIC_REPLY_TO_FLAG, &properties.reply_to}},
+		{"Expiration", {AMQP_BASIC_EXPIRATION_FLAG, &properties.expiration}},
+		{"Message-Id", {AMQP_BASIC_MESSAGE_ID_FLAG, &properties.message_id}},
+		{"Timestamp", {AMQP_BASIC_TIMESTAMP_FLAG, &properties.timestamp}},
+		{"Type", {AMQP_BASIC_TYPE_FLAG, &properties.type}},
+		{"User-Id", {AMQP_BASIC_USER_ID_FLAG, &properties.user_id}},
+		{"App-Id", {AMQP_BASIC_APP_ID_FLAG, &properties.app_id}},
+		{"Cluster-Id", {AMQP_BASIC_CLUSTER_ID_FLAG, &properties.cluster_id}}
 	};
 };
 
-using Envelope = amqp_envelope_t;
 using RpcReply = amqp_rpc_reply_t;
+
+/**
+ * @brief A "message envelope" object containing the message body 
+ * and delivery metadata, extends amqp_envelope_t struct.
+ */
+class Envelope : public amqp_envelope_t
+{
+public:
+	virtual ~Envelope()
+	{
+		// envelope a pointer to a amqp_envelope_t object. Caller
+		// should call #amqp_destroy_envelope() when it is done using
+		// the fields in the envelope object.
+		amqp_destroy_envelope(this);
+	}
+};
 
 /**
  * @brief Creates a new connection to an AMQP broker
@@ -313,10 +326,7 @@ class MessageBroker
 public:
 	typedef std::shared_ptr<MessageBroker> Ptr;
 
-	using Connection = amqp::Connection;
-	using Channel = amqp::Channel;
 	using Configuration = amqp::Configuration;
-	using Envelope = amqp::Envelope;
 	using Message = amqp::Message;
 	using Request = amqp::Request;
 	using Response = amqp::Response;
@@ -365,6 +375,9 @@ public:
 	/// RPC messaging pattern for event subscription.
 	void subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback);
 
+	/// Close all subscription and join threads.
+	void close();
+
 protected:
 	std::string m_host;
 	int m_port;
@@ -372,8 +385,10 @@ protected:
 	std::string m_password;
 	std::string m_vhost;
 	int m_frame_max;
+	std::vector<std::thread> m_threads;
+	std::atomic<bool> m_close{false};
 };
 
-} // end namespace gammasoft
+} // end namespace soft
 
 #endif // MESSAGE_BROKER_H

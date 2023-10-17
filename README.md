@@ -7,14 +7,14 @@ See examples and https://www.rabbitmq.com/getstarted.html for quick start.
 
 Publisher:
 ```cpp
-MessageBroker broker;
-MessageBroker::Configuration c1;
+MessageBroker broker("amqp://guest:guest@localhost:5672");
+MessageBroker::Configuration configuration;
 
-c1.exchange.name = "hello";
-c1.exchange.type = "fanout";
-c1.exchange.declare = true;
+configuration.exchange.name = "hello";
+configuration.exchange.type = "fanout";
+configuration.exchange.declare = true;
 
-broker.publish(c1, "hello");
+broker.publish(configuration, "hello");
 ```
 
 Subscriber:
@@ -41,16 +41,16 @@ broker.subscribe(configuration, [](const auto& message) {
 
 Publisher:
 ```cpp
-MessageBroker broker;
-MessageBroker::Configuration c1;
+MessageBroker broker("amqp://guest:guest@localhost:5672");
+MessageBroker::Configuration c;
 
-c1.queue.exclusive = true;
-c1.queue.declare = true;
-c1.routing_key = "rpc_queue";
+c.queue.exclusive = true;
+c.queue.declare = true;
+c.routing_key = "rpc_queue";
 
 struct timeout tv = {5,0};
 
-auto response = broker.publish(c1, "30", &tv);
+auto response = broker.publish(c, "30", &tv);
 
 if (response->ok())
 {
@@ -60,13 +60,13 @@ if (response->ok())
 
 Subscriber:
 ```cpp
-MessageBroker broker;
-MessageBroker::Configuration c2;
+MessageBroker broker("amqp://guest:guest@localhost:5672");
+MessageBroker::Configuration c;
 
-c2.queue.name = "rpc_queue";
-c2.queue.declare = true;
+c.queue.name = "rpc_queue";
+c.queue.declare = true;
 
-broker.subscribe(c2, [](const auto& request, auto& response){
+broker.subscribe(c, [](const auto& request, auto& response){
 	auto number = std::stoi(request.getBody());
 	std::cout << "[.] fib(" <<  number << ")" << std::endl;
 	response.setBody(std::to_string(fib(number)));

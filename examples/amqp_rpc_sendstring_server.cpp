@@ -2,14 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <amqp.h>
-#include <amqp_tcp_socket.h>
-
 #include <assert.h>
-#include <thread>
+
+#include <rabbitmq-c/amqp.h>
+#include <rabbitmq-c/tcp_socket.h>
+
 #include "../utils.h"
-#include <iostream>
+
+
 int main(int argc, char const *const *argv)
 {
   char const *hostname;
@@ -19,22 +19,9 @@ int main(int argc, char const *const *argv)
   amqp_socket_t *socket = NULL;
   amqp_connection_state_t conn;
   amqp_bytes_t queuename;
-  std::string url = "amqp://guest:guest@172.17.0.2:5672";
-  struct amqp_connection_info ci;
-  amqp_default_connection_info(&ci);
-  std::cout << url << std::endl;
-  auto x = amqp_parse_url((char*)url.c_str(), &ci);
-  std::cout << ci.user << std::endl;
-  std::cout << ci.password << std::endl;
-  std::cout << ci.port << std::endl;
-  std::cout << ci.host << std::endl;
-  std::cout << ci.vhost << std::endl;
-  std::cout << x << std::endl;
-  std::cout << strlen(ci.vhost) << std::endl;
-  die_on_error(x, "Parse url");
 
   if (argc < 5) {
-    fprintf(stderr, "Usage: server_rpc host port exchange bindingkey\n");
+    fprintf(stderr, "Usage:\namqp_rpc_sendstring_server host port exchange bindingkey\n");
     return 1;
   }
 

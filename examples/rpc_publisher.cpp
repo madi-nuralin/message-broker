@@ -2,7 +2,7 @@
 
 #include "../message_broker.hpp"
 
-using namespace gammasoft;
+using namespace soft;
 
 int main(int argc, char const *argv[])
 {

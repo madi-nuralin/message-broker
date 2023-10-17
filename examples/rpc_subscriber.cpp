@@ -1,4 +1,3 @@
-#include <iostream>
 #include <condition_variable>
 #include <mutex>
 #include <iostream>
@@ -38,25 +37,36 @@ static std::mutex _mutex;
         }
     };
 
-using namespace gammasoft;
+using namespace soft;
+
+int fib(int n)
+{
+    switch (n)
+    {
+    case 0:
+        return 0;
+    case 1:
+        return 1;
+    default:
+        return fib(n - 1) + fib(n - 2);
+    }
+}
 
 int main(int argc, char const *argv[])
 {
 	InterruptHandler::hookSIGINT();
-
-	MessageBroker broker("amqp://guest:guest@localhost:5672");
+  
+	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
 	MessageBroker::Configuration configuration;
-
-	configuration.exchange.name = "hello";
-	configuration.exchange.type = "fanout";
-	configuration.exchange.declare = true;
-	configuration.queue.name = "";
-	configuration.queue.exclusive = false;
+  
+	configuration.queue.name = "rpc_queue";
 	configuration.queue.declare = true;
-	configuration.queue.bind = true;
 
-	broker.subscribe(configuration, [](const auto& message) {
-		std::cout << "[x] Received b'" << message.getBody() << "'" << std::endl;
+	broker.subscribe(configuration, [](const auto& request, auto& response){
+		auto number = std::stoi(request.getBody());
+		std::cout << "[.] fib(" <<  number << ")" << std::endl;
+		response.setBody(std::to_string(fib(number)));
+		return true;
 	});
 
 	InterruptHandler::waitForUserInterrupt();

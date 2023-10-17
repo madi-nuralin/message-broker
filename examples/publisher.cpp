@@ -2,11 +2,11 @@
 
 #include "../message_broker.hpp"
 
-using namespace gammasoft;
+using namespace soft;
 
 int main(int argc, char const *argv[])
 {
-	MessageBroker broker;
+	MessageBroker broker("amqp://guest:guest@localhost:5672");
 	MessageBroker::Configuration configuration;
 
 	configuration.exchange.name = "hello";

@@ -1,18 +1,120 @@
-#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <stdexcept>
-#include <iostream>
+#include <set>
 #include <thread>
+#include <chrono>
 
 #include "message_broker.hpp"
 #include "utils.h"
 
-namespace gammasoft {
+namespace soft {
 
 namespace amqp {
 
+class id_interval 
+{
+public:
+	id_interval(int ll, int uu) : m_left(ll), m_right(uu) {}
+	bool operator < (const id_interval& ) const;
+	int left() const { return m_left; }
+	int right() const {  return m_right; }
+private:
+	int m_left, m_right;
+};
+
+class IdManager {
+public:
+	IdManager();
+	int allocateId();          // Allocates an id
+	void freeId(int id);       // Frees an id so it can be used again
+	bool markAsUsed(int id);   // Let's the user register an id. 
+private: 
+	typedef std::set<id_interval> id_intervals_t;
+	id_intervals_t m_free;
+};
+
+IdManager::IdManager()
+{
+    m_free.insert(id_interval(1, std::numeric_limits<int>::max()));
+}
+
+int IdManager::allocateId()
+{
+    id_interval first = *(m_free.begin());
+    int free_id = first.left();
+    m_free.erase(m_free.begin());
+    if (first.left() + 1 <= first.right()) {
+        m_free.insert(id_interval(first.left() + 1 , first.right()));
+    }
+    return free_id;
+}
+
+bool IdManager::markAsUsed(int id)
+{
+    id_intervals_t::iterator it = m_free.find(id_interval(id,id));
+    if (it == m_free.end()) {
+        return false;
+    } else {
+        id_interval free_interval = *(it);
+        m_free.erase (it);
+        if (free_interval.left() < id) {
+            m_free.insert(id_interval(free_interval.left(), id-1));
+        }
+        if (id +1 <= free_interval.right() ) {
+            m_free.insert(id_interval(id+1, free_interval.right()));
+        }
+        return true;
+    }
+}
+
+void IdManager::freeId(int id)
+{
+    id_intervals_t::iterator it = m_free.find(id_interval(id,id));
+    if (it != m_free.end()  && it->left() <= id && it->right() > id) {
+        return ;
+    }
+    it = m_free.upper_bound(id_interval(id,id));
+    if (it == m_free.end()) {
+        return ;
+    } else {
+        id_interval free_interval = *(it);
+
+        if (id + 1 != free_interval.left()) {
+            m_free.insert(id_interval(id, id));
+        } else {
+            if (it != m_free.begin()) {
+                id_intervals_t::iterator it_2 = it;
+                --it_2;
+                if (it_2->right() + 1 == id ) {
+                    id_interval free_interval_2 = *(it_2);
+                    m_free.erase(it);
+                    m_free.erase(it_2);
+                    m_free.insert(
+                        id_interval(free_interval_2.left(), 
+                                    free_interval.right()));
+                } else {
+                    m_free.erase(it);
+                    m_free.insert(id_interval(id, free_interval.right()));
+                }
+            } else {
+                    m_free.erase(it);
+                    m_free.insert(id_interval(id, free_interval.right()));
+            }
+        }
+    }
+}
+
+bool id_interval::operator < (const id_interval& s) const
+{
+    return (m_left < s.m_left) && (m_right < s.m_right);
+}
+
 class ConnectionImpl
 {
+//	std::mutex m_lock;
+//	IdManager m_idManager;
 	amqp_connection_state_t m_state;
 
 public:
@@ -39,9 +141,8 @@ public:
 	inline virtual ~ConnectionImpl()
 	{
 		die_on_amqp_error(amqp_connection_close(m_state, AMQP_REPLY_SUCCESS),
-			"connection.close");
-		die_on_error(amqp_destroy_connection(m_state),
-			"destroy.connection");
+				"Closing connection");
+		die_on_error(amqp_destroy_connection(m_state), "Ending connection");
 	}
 
 	void maybe_release_buffers()
@@ -60,21 +161,21 @@ public:
 class ChannelImpl
 {
 	amqp_channel_t m_id;
-	ConnectionImpl *m_connection;
+	ConnectionImpl *m_connectionImpl;
 
 public:
-	inline ChannelImpl(Connection *connection) : m_id(1)
+	inline ChannelImpl(Connection *connection)
+		: m_connectionImpl(connection->m_impl.get()), m_id(1)
 	{
-		m_connection = connection->m_impl.get();
-		amqp_channel_open(m_connection->m_state, m_id);
-		die_on_amqp_error(amqp_get_rpc_reply(m_connection->m_state),
-			"channel.open");
+		amqp_channel_open(m_connectionImpl->m_state, m_id);
+		die_on_amqp_error(amqp_get_rpc_reply(m_connectionImpl->m_state),
+				"Opening channel");
 	}
 
 	inline virtual ~ChannelImpl()
 	{
-		die_on_amqp_error(amqp_channel_close(m_connection->m_state, m_id, AMQP_REPLY_SUCCESS),
-			"channel.close");
+		die_on_amqp_error(amqp_channel_close(m_connectionImpl->m_state, m_id, AMQP_REPLY_SUCCESS),
+				"Closing connection");
 	}
 
 	std::tuple<std::string, std::string> setup(const Configuration& configuration)
@@ -87,7 +188,7 @@ public:
 
 		if (configuration.exchange.declare) {
 			amqp_exchange_declare(
-				m_connection->m_state,
+				m_connectionImpl->m_state,
 				m_id,
 				amqp_cstring_bytes(configuration.exchange.name.c_str()),
 				amqp_cstring_bytes(configuration.exchange.type.c_str()),
@@ -98,7 +199,7 @@ public:
 				amqp_empty_table);
 
 			die_on_amqp_error(
-				amqp_get_rpc_reply(m_connection->m_state), "exchange.declare");
+				amqp_get_rpc_reply(m_connectionImpl->m_state), "exchange.declare");
 
 			exchange = configuration.exchange.name;
 		}
@@ -106,7 +207,7 @@ public:
 		if (configuration.queue.declare) {
 			amqp_queue_declare_ok_t *r =
 				amqp_queue_declare(
-					m_connection->m_state,
+					m_connectionImpl->m_state,
 					m_id,
 					amqp_cstring_bytes(configuration.queue.name.c_str()),
 					configuration.queue.passive,
@@ -116,14 +217,14 @@ public:
 					amqp_empty_table);
 
 			die_on_amqp_error(
-				amqp_get_rpc_reply(m_connection->m_state), "queue.declare");
+				amqp_get_rpc_reply(m_connectionImpl->m_state), "queue.declare");
 
 			queue = std::string((char*)r->queue.bytes, r->queue.len);
 		}
 
 		if (configuration.queue.bind) {
 			amqp_queue_bind(
-				m_connection->m_state,
+				m_connectionImpl->m_state,
 				m_id,
 				amqp_cstring_bytes(queue.c_str()),
 				amqp_cstring_bytes(exchange.c_str()),
@@ -131,7 +232,7 @@ public:
 				amqp_empty_table);
 
 			die_on_amqp_error(
-				amqp_get_rpc_reply(m_connection->m_state), "queue.bind");
+				amqp_get_rpc_reply(m_connectionImpl->m_state), "queue.bind");
 		}
 
 		return std::make_tuple(exchange, queue);
@@ -141,7 +242,7 @@ public:
 	{
 		die_on_error(
 			amqp_basic_publish(
-				m_connection->m_state,
+				m_connectionImpl->m_state,
 				m_id,
 				amqp_cstring_bytes(exchange.c_str()),
 				amqp_cstring_bytes(routing_key.c_str()),
@@ -155,7 +256,7 @@ public:
 	void basic_consume(const std::string &queue_name, const std::string &consumer_tag, bool no_local, bool no_ack, bool exclusive)
 	{
 		amqp_basic_consume(
-			m_connection->m_state,
+			m_connectionImpl->m_state,
 			m_id,
 			amqp_cstring_bytes(queue_name.c_str()),
 			amqp_cstring_bytes(consumer_tag.c_str()),
@@ -165,32 +266,32 @@ public:
 			amqp_empty_table);
 
 		die_on_amqp_error(
-			amqp_get_rpc_reply(m_connection->m_state), "basic.consume");
+			amqp_get_rpc_reply(m_connectionImpl->m_state), "basic.consume");
 	}
 
 	void basic_cancel(const std::string &consumer_tag)
 	{
 		if (!consumer_tag.empty()) {
-			amqp_basic_cancel(m_connection->m_state, m_id, amqp_cstring_bytes(consumer_tag.c_str()));
-			die_on_amqp_error(amqp_get_rpc_reply(m_connection->m_state), "basic.cancel");
+			amqp_basic_cancel(m_connectionImpl->m_state, m_id, amqp_cstring_bytes(consumer_tag.c_str()));
+			die_on_amqp_error(amqp_get_rpc_reply(m_connectionImpl->m_state), "basic.cancel");
 		}
 	}
 
 	void basic_qos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
 	{
-		if (!amqp_basic_qos(m_connection->m_state, m_id, prefetch_count, prefetch_size, global)) {
-			die_on_amqp_error(amqp_get_rpc_reply(m_connection->m_state), "basic.qos");
+		if (!amqp_basic_qos(m_connectionImpl->m_state, m_id, prefetch_count, prefetch_size, global)) {
+			die_on_amqp_error(amqp_get_rpc_reply(m_connectionImpl->m_state), "basic.qos");
 		}
 	}
 
 	void basic_ack(uint64_t delivery_tag, bool multiple)
 	{
-		die_on_error(amqp_basic_ack(m_connection->m_state, m_id, delivery_tag, multiple), "basic.ack");
+		die_on_error(amqp_basic_ack(m_connectionImpl->m_state, m_id, delivery_tag, multiple), "basic.ack");
 	}
 
 	void basic_nack(uint64_t delivery_tag, bool multiple, bool requeue)
 	{
-		die_on_error(amqp_basic_nack(m_connection->m_state, m_id, delivery_tag, multiple, requeue), "basic.nack");
+		die_on_error(amqp_basic_nack(m_connectionImpl->m_state, m_id, delivery_tag, multiple, requeue), "basic.nack");
 	}
 };
 
@@ -263,7 +364,7 @@ void Channel::basic_nack(uint64_t delivery_tag, bool multiple, bool requeue)
 
 } // end namespace amqp
 
-using namespace gammasoft::amqp;
+using namespace soft::amqp;
 
 const char ALPHABET[] = {
     "0123456789"
@@ -317,7 +418,7 @@ MessageBroker::MessageBroker(
 	char *p = strdup(url.c_str());
 
 	die_on_error(
-		amqp_parse_url(p, &ci), "parse.url");
+		amqp_parse_url(p, &ci), "Parsing URL");
 
 	m_host = ci.host;
 	m_port = ci.port;
@@ -331,6 +432,10 @@ MessageBroker::MessageBroker(
 
 MessageBroker::~MessageBroker()
 {
+	m_close = true;
+	for( auto it = m_threads.begin(); it != m_threads.end(); it++ ) {
+		it->join();
+	}
 }
 
 void MessageBroker::publish(const Configuration &configuration, const std::string &messagebody)
@@ -368,20 +473,20 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 	channel.basic_publish(exchange, configuration.routing_key, request);
 	channel.basic_consume(reply_to);
 
+	struct timeval tv = {30,0};
+
 	for(;;) {
 		RpcReply res;
 		Envelope envelope;
 
 		connection.maybe_release_buffers();
-		res = connection.consume_message(&envelope, timeout, 0);
+		res = connection.consume_message(&envelope, timeout ? timeout : &tv, 0);
 
 		if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-			continue;
+			die_on_error(res.library_error, "AMQP consume message");
 		}
 
 		response = std::make_shared<Response>(envelope.message);
-
-		amqp_destroy_envelope(&envelope);
 
 		break;
 	}
@@ -391,7 +496,9 @@ MessageBroker::Response::Ptr MessageBroker::publish(const Configuration &configu
 
 void MessageBroker::subscribe(const Configuration &configuration, std::function<void (const Message&)> callback)
 {
-	std::thread worker([this, configuration, callback](){
+	std::thread worker([this, configuration, callback]()
+	{
+		struct timeval tv = {1,0};
 		Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
 		Channel channel(&connection);
 
@@ -399,29 +506,31 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 
 		channel.basic_consume(queue);
 
-		for(;;) {
+		while(!m_close) {
 			RpcReply res;
 			Envelope envelope;
 
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
 			connection.maybe_release_buffers();
-			res = connection.consume_message(&envelope, nullptr, 0);
+			res = connection.consume_message(&envelope, &tv, 0);
 
 			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
 				continue;
 			}
 
 			callback(envelope.message);
-
-			amqp_destroy_envelope(&envelope);
 		}
 	});
 
-	worker.detach();
+	m_threads.push_back(std::move(worker));
 }
 
 void MessageBroker::subscribe(const Configuration &configuration, std::function<bool (const Request&, Response&)> callback)
 {
-	std::thread worker([this, configuration, callback](){
+	std::thread worker([this, configuration, callback]()
+	{
+		struct timeval tv = {1,0};
 		Connection connection(m_host,m_port,m_username,m_password,m_vhost,m_frame_max);
 		Channel channel(&connection);
 
@@ -429,12 +538,14 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 
 		channel.basic_consume(queue);
 
-		for(;;) {
+		while(!m_close) {
 			RpcReply res;
 			Envelope envelope;
 
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
 			connection.maybe_release_buffers();
-			res = connection.consume_message(&envelope, nullptr, 0);
+			res = connection.consume_message(&envelope, &tv, 0);
 
 			if (AMQP_RESPONSE_NORMAL != res.reply_type) {
 				continue;
@@ -454,12 +565,15 @@ void MessageBroker::subscribe(const Configuration &configuration, std::function<
 			response.setProperty("Type", ok ? "response" : "error");
 
 			channel.basic_publish("", reply_to, response);
-
-			amqp_destroy_envelope(&envelope);
 		}
 	});
 
-	worker.detach();
+	m_threads.push_back(std::move(worker));
 }
 
-} // end namespace gammasoft
+void MessageBroker::close()
+{
+	m_close = true;
+}
+
+} // end namespace soft
