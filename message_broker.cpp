@@ -9,9 +9,217 @@
 #include "message_broker.hpp"
 #include "utils.h"
 
+#include <rabbitmq-c/amqp.h>
+#include <rabbitmq-c/tcp_socket.h>
+
 namespace soft {
 
 namespace amqp {
+
+class Connection2Impl : public Connection2
+{
+public:
+	Connection2Impl() {}
+	virtual ~Connection2Impl() {}
+
+	void releaseBuffers()
+	{
+		
+	}
+};
+
+Connection2::Connection2()
+{
+}
+
+Connection2::~Connection2()
+{
+}
+
+Connection2::Ptr Connection2::createInstance()
+{
+	return Connection2::Ptr(new Connection2Impl());
+}
+
+const char* Channel2::EXCHANGE_TYPE_DIRECT = "direct";
+
+const char* Channel2::EXCHANGE_TYPE_FANOUT = "fanout";
+
+const char* Channel2::EXCHANGE_TYPE_TOPIC = "topic";
+
+class Channel2Impl : public Channel2
+{
+public:
+    Channel2Impl() { }
+    virtual ~Channel2Impl() { }
+
+    void exchangeDeclare(const std::string& exchange_name, const std::string& exchange_type,
+        bool passive, bool durable, bool auto_delete, bool internal)
+    {
+        amqp_exchange_declare(m_cn, m_ch,
+            amqp_cstring_bytes(exchange_name.c_str()), amqp_cstring_bytes(exchange_type.c_str()),
+            passive, durable, auto_delete, internal, amqp_empty_table);
+        die_on_amqp_error(amqp_get_rpc_reply(m_cn), "exchange.declare");
+    }
+
+    void exchangeBind(const std::string& destination,
+        const std::string& source, const std::string& routing_key)
+    {
+
+    }
+
+    void exchangeUnbind(
+        const std::string& destination,
+        const std::string& source,
+        const std::string& routing_key)
+    {
+    }
+
+    void queueDeclare(const std::string& queue_name,
+        bool passive, bool durable, bool exclusive, bool auto_delete)
+    {
+		amqp_queue_declare_ok_t *r = amqp_queue_declare(m_cn, m_ch,
+			amqp_cstring_bytes(queue_name.c_str()),
+			passive, durable, exclusive, auto_delete, amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(m_cn), "queue.declare");
+		//return std::string((char*)r->queue.bytes, r->queue.len);
+    }
+
+    void queueBind(const std::string& queue_name,
+        const std::string& exchange_name, const std::string& routing_key)
+    {
+    	amqp_queue_bind(m_cn, m_ch,
+    		amqp_cstring_bytes(queue_name.c_str()), amqp_cstring_bytes(exchange_name.c_str()),
+    		amqp_cstring_bytes(routing_key.c_str()), amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(m_cn), "queue.bind");
+    }
+
+    void queueUnbind(
+        const std::string& queue_name,
+        const std::string& exchange_name,
+        const std::string& routing_key = "")
+    {
+    }
+
+    void basicPublish(const std::string& exchange, const std::string& routing_key,
+    	const Message2& message, bool mandatory, bool immediate)
+    {
+    	amqp_basic_properties_t props = p2p(message.properties);
+        die_on_error(amqp_basic_publish(m_cn, m_ch,
+			amqp_cstring_bytes(exchange.c_str()), amqp_cstring_bytes(routing_key.c_str()),
+			mandatory, immediate, &props, message.body.c_str()), "basic.publish");
+    }
+
+    void basicConsume(const std::string& queue_name, const std::string& consumer_tag,
+        bool no_local, bool no_ack, bool exclusive)
+    {
+    	amqp_basic_consume(m_cn, m_ch,
+			amqp_cstring_bytes(queue_name.c_str()), amqp_cstring_bytes(consumer_tag.c_str()),
+			no_local, no_ack, exclusive, amqp_empty_table);
+		die_on_amqp_error(amqp_get_rpc_reply(m_cn), "basic.consume");
+    }
+
+    void basicCancel(const std::string& consumer_tag)
+    {
+        if (!consumer_tag.empty()) {
+            amqp_basic_cancel(m_cn, m_ch, amqp_cstring_bytes(consumer_tag.c_str()));
+            die_on_amqp_error(amqp_get_rpc_reply(m_cn), "basic.cancel");
+        }
+    }
+
+    void basicQos(uint32_t prefetch_size, uint16_t prefetch_count, bool global)
+    {
+        if (!amqp_basic_qos(m_cn, m_ch, prefetch_count, prefetch_size, global)) {
+            die_on_amqp_error(amqp_get_rpc_reply(m_cn), "basic.qos");
+        }
+    }
+
+    void basicAck(uint64_t delivery_tag, bool multiple)
+    {
+    	die_on_error(amqp_basic_ack(m_cn, m_ch, delivery_tag, multiple), "basic.ack");
+    }
+
+    void basicNack(uint64_t delivery_tag, bool multiple, bool requeue)
+    {
+    	die_on_error(amqp_basic_nack(m_cn, m_ch, delivery_tag, multiple, requeue), "basic.nack");
+    }
+
+private:
+    amqp_connection_state_t m_cn;
+    amqp_channel_t m_ch;
+
+    amqp_basic_properties_t p2p(const Properties2& properties)
+    {
+    	amqp_basic_properties_t props;
+    	props._flags = 0;
+    	if (properties.content_type.has_value()) {
+            props._flags |= AMQP_BASIC_CONTENT_TYPE_FLAG;
+            props.content_type = properties.content_type.c_str();
+        }
+        if (properties.content_encoding.has_value()) {
+            props._flags |= AMQP_BASIC_CONTENT_ENCODING_FLAG;
+            props.content_encoding = properties.content_encoding.c_str();
+        }
+        if (properties.delivery_mode.has_value()) {
+            props._flags |= AMQP_BASIC_DELIVERY_MODE_FLAG;
+            props.delivery_mode = properties.delivery_mode;
+        }
+        if (properties.priority.has_value()) {
+            props._flags |= AMQP_BASIC_PRIORITY_FLAG;
+            props.priority = properties.priority;
+        }
+        if (properties.correlation_id.has_value()) {
+            props._flags |= AMQP_BASIC_CORRELATION_ID_FLAG;
+            props.correlation_id = properties.correlation_id.c_str();
+        }
+        if (properties.reply_to.has_value()) {
+            props._flags |= AMQP_BASIC_REPLY_TO_FLAG;
+            props.reply_to = properties.reply_to.c_str();
+        }
+        if (properties.expiration.has_value()) {
+            props._flags |= AMQP_BASIC_EXPIRATION_FLAG;
+            props.expiration = properties.expiration.c_str();
+        }
+        if (properties.message_id.has_value()) {
+            props._flags |= AMQP_BASIC_MESSAGE_ID_FLAG;
+            props.message_id = properties.message_id.c_str();
+        }
+        if (properties.timestamp.has_value()) {
+            props._flags |= AMQP_BASIC_TIMESTAMP_FLAG;
+            props.timestamp = properties.timestamp;
+        }
+        if (properties.type.has_value()) {
+            props._flags |= AMQP_BASIC_TYPE_FLAG;
+            props.type = properties.type.c_str();
+        }
+        if (properties.user_id.has_value()) {
+            props._flags |= AMQP_BASIC_USER_ID_FLAG;
+            props.user_id = properties.user_id.c_str();
+        }
+        if (properties.app_id.has_value()) {
+            props._flags |= AMQP_BASIC_APP_ID_FLAG;
+            props.app_id = properties.app_id.c_str();
+        }
+        if (properties.cluster_id.has_value()) {
+            props._flags |= AMQP_BASIC_CLUSTER_ID_FLAG;
+            props.cluster_id = properties.cluster_id.c_str();
+        }
+        return props;
+    }
+};
+
+Channel2::Channel2()
+{
+}
+
+Channel2::~Channel2()
+{
+}
+
+Channel2::Ptr Channel2::createInstance(Connection2::Ptr connection)
+{
+	return Channel2::Ptr(new Channel2Impl());
+}
 
 class id_interval 
 {

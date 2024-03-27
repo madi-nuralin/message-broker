@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <optional>
 
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
@@ -16,6 +17,200 @@
 namespace soft {
 
 namespace amqp {
+	struct Properties2 {
+		std::optional<std::string> content_type;
+		std::optional<std::string> content_encoding;
+		std::optional<uint8_t> delivery_mode;
+		std::optional<uint8_t> priority;
+		std::optional<std::string> correlation_id;
+		std::optional<std::string> reply_to;
+		std::optional<std::string> expiration;
+		std::optional<std::string> message_id;
+		std::optional<uint64_t> timestamp;
+		std::optional<std::string> type;
+		std::optional<std::string> user_id;
+		std::optional<std::string> app_id;
+		std::optional<std::string> cluster_id;
+	};
+
+	struct Message2 {
+		std::string body;
+		Properties2 properties;
+	};
+
+	class Connection2 {
+	public:
+		using Ptr = std::shared_ptr<Connection2>;
+        using WPtr = std::weak_ptr<Connection2>;
+
+		Connection2();
+		virtual ~Connection2();
+
+		virtual void releaseBuffers() = 0;
+
+		static Ptr createInstance();
+	};
+
+    class Channel2 {
+    	///< `"direct"` string constant
+        static const char* EXCHANGE_TYPE_DIRECT;
+
+        ///< `"fanout"` string constant
+        static const char* EXCHANGE_TYPE_FANOUT;
+
+        ///< `"topic"` string constant
+        static const char* EXCHANGE_TYPE_TOPIC;
+
+    public:
+        using Ptr = std::shared_ptr<Channel2>;
+        using WPtr = std::weak_ptr<Channel2>;
+
+        Channel2();
+        virtual ~Channel2();
+
+        /**
+         * Declares an exchange
+         *
+         * Creates an exchange on the AMQP broker if it does not already exist
+         * @param exchange_name the name of the exchange
+         * @param exchange_type the type of exchange to be declared. Defaults to
+         * `direct`; other types that could be used: `fanout`, `topic`
+         * @param passive Indicates how the broker should react if the exchange does
+         * not exist. If passive is `true` and the exhange does not exist the broker
+         * will respond with an error and not create the exchange; exchange is created
+         * otherwise. Defaults to `false` (exchange is created if needed)
+         * @param durable Indicates whether the exchange is durable - e.g., will it
+         * survive a broker restart.
+         * @param auto_delete Indicates whether the exchange will automatically be
+         * removed when no queues are bound to it.
+         */
+        virtual void exchangeDeclare(
+            const std::string& exchange_name,
+            const std::string& exchange_type = Channel2::EXCHANGE_TYPE_DIRECT,
+            bool passive = false,
+            bool durable = false,
+            bool auto_delete = false,
+            bool internal = false)
+            = 0;
+
+        /**
+         * Binds one exchange to another exchange using a given key
+         * @param destination the name of the exchange to route messages to
+         * @param source the name of the exchange to route messages from
+         * @param routing_key the routing key to use when binding
+         */
+        virtual void exchangeBind(
+            const std::string& destination,
+            const std::string& source,
+            const std::string& routing_key)
+            = 0;
+
+        /**
+         * Unbind an existing exchange-exchange binding
+         * @see BindExchange
+         * @param destination the name of the exchange to route messages to
+         * @param source the name of the exchange to route messages from
+         * @param routing_key the routing key to use when binding
+         */
+        virtual void exchangeUnbind(
+            const std::string& destination,
+            const std::string& source,
+            const std::string& routing_key)
+            = 0;
+
+        /**
+         * Declare a queue
+         *
+         * Creates a queue on the AMQP broker if it does not already exist.
+         * @param queue_name The desired name of the queue. If this is an empty
+         * string, the broker will generate a queue name that this method will return.
+         * @param passive Indicated how the broker should react if the queue does not
+         * exist. The broker will raise an error if the queue doesn't already exist
+         * and passive is `true`. With passive `false` (the default), the queue gets
+         * created automatically, if needed.
+         * @param durable Indicates whether the exchange is durable - e.g., will it
+         * survive a broker restart.
+         * @param exclusive Indicates that only client can use the queue. Defaults to
+         * true. An exclusive queue is deleted when the connection is closed.
+         * @param auto_delete the queue will be deleted after at least one exchange
+         * has been bound to it, then has been unbound
+         * @returns The name of the queue created on the broker. Used mostly when the
+         * broker is asked to create a unique queue by not providing a queue name.
+         */
+        virtual void queueDeclare(const std::string& queue_name, bool passive = false,
+            bool durable = false, bool exclusive = true,
+            bool auto_delete = true)
+            = 0;
+
+        /**
+         * Binds a queue to an exchange
+         *
+         * Connects a queue to an exchange on the broker.
+         * @param queue_name The name of the queue to bind.
+         * @param exchange_name The name of the exchange to bind to.
+         * @param routing_key Defines the routing key of the binding. Only messages
+         * with matching routing key will be delivered to the queue from the exchange.
+         * Defaults to `""` which means all messages will be delivered.
+         */
+        virtual void queueBind(
+            const std::string& queue_name,
+            const std::string& exchange_name,
+            const std::string& routing_key = "")
+            = 0;
+
+        /**
+         * Unbinds a queue from an exchange
+         *
+         * Disconnects a queue from an exchange.
+         * @param queue_name The name of the queue to unbind.
+         * @param exchange_name The name of the exchange to unbind.
+         * @param routing_key This must match the routing_key of the binding.
+         * @see BindQueue
+         */
+        virtual void queueUnbind(
+            const std::string& queue_name,
+            const std::string& exchange_name,
+            const std::string& routing_key = "")
+            = 0;
+
+        virtual void basicPublish(
+            const std::string& exchange,
+            const std::string& routing_key,
+            const Message2& message,
+            bool mandatory = false,
+            bool immediate = false)
+            = 0;
+
+        virtual void basicConsume(
+            const std::string& queue_name,
+            const std::string& consumer_tag = "",
+            bool no_local = false,
+            bool no_ack = true,
+            bool exclusive = false)
+            = 0;
+
+        virtual void basicCancel(
+            const std::string& consumer_tag)
+            = 0;
+
+        virtual void basicQos(
+            uint32_t prefetch_size,
+            uint16_t prefetch_count,
+            bool global)
+            = 0;
+
+        /**
+         * Acknowledges a Basic message
+         *
+         * Acknowledges a message delievered using \ref BasicGet or \ref BasicConsume.
+         * @param message The message that is being ack'ed.
+         */
+        virtual void basicAck(uint64_t delivery_tag, bool multiple = false) = 0;
+
+        virtual void basicNack(uint64_t delivery_tag, bool multiple = false, bool requeue = false) = 0;
+
+        static Ptr createInstance(Connection2::Ptr);
+    };
 
 /**
  * @brief Class for specifying the RabbitMQ queue and exchange
