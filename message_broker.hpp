@@ -1,19 +1,17 @@
 #ifndef MESSAGE_BROKER_H
 #define MESSAGE_BROKER_H
 
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
-#include <vector>
 
-namespace soft {
+namespace gs {
 
 namespace amqp {
 
+/** basic class properties */
 struct AmqpProperties
 {
   std::optional<std::string> content_type;
@@ -40,13 +38,22 @@ public:
   AmqpMessage();
   virtual ~AmqpMessage();
 
-  virtual std::string& body() noexcept = 0;
-  virtual void body(const std::string&) noexcept = 0;
+  /**
+   * Gets the message body as a std::string&
+   */
+  const std::string& body() const noexcept;
+  std::string& body() noexcept;
 
-  virtual AmqpProperties& properties() noexcept = 0;
-  virtual void properties(const AmqpProperties&) noexcept = 0;
+  /**
+   * Gets the message properties as a AmqpProperties&
+   */
+  const AmqpProperties& properties() const noexcept;
+  AmqpProperties& properties() noexcept;
 
-  static Ptr createInstance();
+private:
+  struct Impl;
+  /// PIMPL idiom
+  std::unique_ptr<Impl> m_impl;
 };
 
 class AmqpEnvelope
@@ -55,24 +62,46 @@ public:
   using Ptr = std::shared_ptr<AmqpEnvelope>;
   using WPtr = std::weak_ptr<AmqpEnvelope>;
 
-  AmqpEnvelope();
+  AmqpEnvelope(const AmqpMessage message,
+               const std::string& consumer_tag,
+               const std::uint64_t delivery_tag,
+               const std::string& exchange,
+               bool redelivered,
+               const std::string& routing_key);
   virtual ~AmqpEnvelope();
 
-  virtual AmqpMessage::Ptr message() const noexcept = 0;
-  virtual void message(AmqpMessage::Ptr) noexcept = 0;
+  inline AmqpMessage message() { return m_message; }
 
-  virtual std::string consumerTag() const noexcept = 0;
-  virtual consumerTag(const std::string&) noexcept = 0;
+  inline std::string consumerTag() const { return m_consumerTag; }
 
-  virtual std::uint64_t deliveryTag() const noexcept = 0;
+  inline std::uint64_t deliveryTag() const { return m_deliveryTag; }
 
-  virtual std::string exchange() const noexcept = 0;
+  inline std::string exchange() const { return m_exchange; }
 
-  virtual bool redelivered() const noexcept = 0;
+  inline bool redelivered() const { return m_redelivered; }
 
-  virtual std::string routingKey() const noexcept = 0;
+  inline std::string routingKey() const { return m_routingKey; }
 
-  static Ptr createInstance();
+  static Ptr createInstance(const AmqpMessage message,
+                            const std::string& consumer_tag,
+                            const std::uint64_t delivery_tag,
+                            const std::string& exchange,
+                            bool redelivered,
+                            const std::string& routing_key)
+  {
+    return std::make_shared<AmqpEnvelope>(
+      message, consumer_tag, delivery_tag, exchange, redelivered, routing_key);
+  }
+
+private:
+  AmqpEnvelope() = delete;
+
+  const AmqpMessage m_message;
+  const std::string m_consumerTag;
+  const std::uint64_t m_deliveryTag;
+  const std::string m_exchange;
+  const bool m_redelivered;
+  const std::string m_routingKey;
 };
 
 class AmqpConnection
@@ -84,13 +113,18 @@ public:
   AmqpConnection();
   virtual ~AmqpConnection();
 
-  virtual void open(const std::string& host, int port) = 0;
-  virtual void login(const std::string& vhost,
-                     const std::string& username,
-                     const std::string& password,
-                     int frame_max) const = 0;
+  void open(const std::string& host, int port);
+  void login(const std::string& vhost,
+             const std::string& username,
+             const std::string& password,
+             int frame_max) const;
 
-  static Ptr createInstance();
+  static Ptr createInstance() { return std::make_shared<AmqpConnection>(); }
+
+private:
+  struct Impl;
+  /// PIMPL idiom
+  std::unique_ptr<Impl> m_impl;
 };
 
 class AmqpChannel
@@ -108,7 +142,8 @@ public:
   using Ptr = std::shared_ptr<AmqpChannel>;
   using WPtr = std::weak_ptr<AmqpChannel>;
 
-  AmqpChannel();
+  AmqpChannel(const AmqpConnection& conn);
+  AmqpChannel(const AmqpConnection::Ptr conn);
   virtual ~AmqpChannel();
 
   /**
@@ -127,13 +162,13 @@ public:
    * @param auto_delete Indicates whether the exchange will automatically be
    * removed when no queues are bound to it.
    */
-  virtual void exchangeDeclare(
+  void exchangeDeclare(
     const std::string& exchange_name,
     const std::string& exchange_type = AmqpChannel::EXCHANGE_TYPE_DIRECT,
     bool passive = false,
     bool durable = false,
     bool auto_delete = false,
-    bool internal = false) = 0;
+    bool internal = false);
 
   /**
    * Binds one exchange to another exchange using a given key
@@ -141,9 +176,9 @@ public:
    * @param source the name of the exchange to route messages from
    * @param routing_key the routing key to use when binding
    */
-  virtual void exchangeBind(const std::string& destination,
-                            const std::string& source,
-                            const std::string& routing_key) = 0;
+  void exchangeBind(const std::string& destination,
+                    const std::string& source,
+                    const std::string& routing_key);
 
   /**
    * Unbind an existing exchange-exchange binding
@@ -152,13 +187,13 @@ public:
    * @param source the name of the exchange to route messages from
    * @param routing_key the routing key to use when binding
    */
-  virtual void exchangeUnbind(const std::string& destination,
-                              const std::string& source,
-                              const std::string& routing_key) = 0;
+  void exchangeUnbind(const std::string& destination,
+                      const std::string& source,
+                      const std::string& routing_key);
 
   /**
    * Declare a queue
-   *
+   *conn
    * Creates a queue on the AMQP broker if it does not already exist.
    * @param queue_name The desired name of the queue. If this is an empty
    * string, the broker will generate a queue name that this method will return.
@@ -175,11 +210,11 @@ public:
    * @returns The name of the queue created on the broker. Used mostly when the
    * broker is asked to create a unique queue by not providing a queue name.
    */
-  virtual std::string queueDeclare(const std::string& queue_name,
-                                   bool passive = false,
-                                   bool durable = false,
-                                   bool exclusive = true,
-                                   bool auto_delete = true) = 0;
+  std::string queueDeclare(const std::string& queue_name,
+                           bool passive = false,
+                           bool durable = false,
+                           bool exclusive = true,
+                           bool auto_delete = true);
 
   /**
    * Binds a queue to an exchange
@@ -191,9 +226,9 @@ public:
    * with matching routing key will be delivered to the queue from the exchange.
    * Defaults to `""` which means all messages will be delivered.
    */
-  virtual void queueBind(const std::string& queue_name,
-                         const std::string& exchange_name,
-                         const std::string& routing_key = "") = 0;
+  void queueBind(const std::string& queue_name,
+                 const std::string& exchange_name,
+                 const std::string& routing_key = "");
 
   /**
    * Unbinds a queue from an exchange
@@ -204,27 +239,80 @@ public:
    * @param routing_key This must match the routing_key of the binding.
    * @see BindQueue
    */
-  virtual void queueUnbind(const std::string& queue_name,
-                           const std::string& exchange_name,
-                           const std::string& routing_key = "") = 0;
+  void queueUnbind(const std::string& queue_name,
+                   const std::string& exchange_name,
+                   const std::string& routing_key = "");
 
-  virtual void basicPublish(const std::string& exchange,
-                            const std::string& routing_key,
-                            const AmqpMessage::Ptr message,
-                            bool mandatory = false,
-                            bool immediate = false) = 0;
+  /**
+   * Publishes a Basic message
+   *
+   * Publishes a Basic message to an exchange
+   * @param exchange_name The name of the exchange to publish the message to
+   * @param routing_key The routing key to publish with, this is used to route
+   * to corresponding queue(s).
+   * @param message The \ref BasicMessage object to publish to the queue.
+   * @param mandatory Requires the message to be delivered to a queue.
+   * @param immediate Requires the message to be both routed to a queue, and
+   * immediately delivered to a consumer.
+   */
+  void basicPublish(const std::string& exchange,
+                    const std::string& routing_key,
+                    const AmqpMessage& message,
+                    bool mandatory = false,
+                    bool immediate = false);
 
-  virtual void basicConsume(const std::string& queue_name,
-                            const std::string& consumer_tag = "",
-                            bool no_local = false,
-                            bool no_ack = true,
-                            bool exclusive = false) = 0;
+  /**
+   * Starts consuming Basic messages on a queue
+   *
+   * Subscribes as a consumer to a queue, so all future messages on a queue
+   * will be Basic.Delivered
+   * @note Due to a limitation to how things are done, it is only possible to
+   * reliably have **a single consumer per channel**; calling this
+   * more than once per channel may result in undefined results.
+   * @param queue The name of the queue to subscribe to.
+   * @param consumer_tag The name of the consumer. This is used to do
+   * operations with a consumer.
+   * @param no_local Defaults to true
+   * @param no_ack If `true`, ack'ing the message is automatically done when the
+   * message is delivered. Defaults to `true` (message does not have to be
+   * ack'ed).
+   * @param exclusive Means only this consumer can access the queue.
+   * @param message_prefetch_count Number of unacked messages the broker will
+   * deliver. Setting this to more than 1 will allow the broker to deliver
+   * messages while a current message is being processed. A value of
+   * 0 means no limit. This option is ignored if `no_ack = true`.
+   * @returns the consumer tag
+   */
+  std::string basicConsume(const std::string& queue_name,
+                           const std::string& consumer_tag = "",
+                           bool no_local = false,
+                           bool no_ack = true,
+                           bool exclusive = false);
 
-  virtual void basicCancel(const std::string& consumer_tag) = 0;
+  /**
+   * Cancels a previously created Consumer
+   *
+   * Unsubscribes a consumer from a queue. In other words undoes what
+   * \ref basicConsume does.
+   * @param consumer_tag The same `consumer_tag` used when the consumer was
+   * created with \ref basicConsume.
+   * @see basicConsume
+   */
+  void basicCancel(const std::string& consumer_tag);
 
-  virtual void basicQos(uint32_t prefetch_size,
-                        uint16_t prefetch_count,
-                        bool global) = 0;
+  /**
+   * Modify consumer's message prefetch count
+   *
+   * Sets the number of unacknowledged messages that will be delivered
+   * by the broker to a consumer.
+   *
+   * Has no effect for consumer with `no_ack` set.
+   *
+   * @param consumer_tag The consumer tag to adjust the prefetch for.
+   * @param message_prefetch_count The number of unacknowledged message the
+   * broker will deliver. A value of 0 means no limit.
+   */
+  void basicQos(uint32_t prefetch_size, uint16_t prefetch_count, bool global);
 
   /**
    * Acknowledges a Basic message
@@ -232,11 +320,14 @@ public:
    * Acknowledges a message delievered using \ref BasicGet or \ref BasicConsume.
    * @param message The message that is being ack'ed.
    */
-  virtual void basicAck(uint64_t delivery_tag, bool multiple = false) = 0;
+  void basicAck(uint64_t delivery_tag, bool multiple = false);
 
-  virtual void basicNack(uint64_t delivery_tag,
-                         bool multiple = false,
-                         bool requeue = false) = 0;
+  /**
+   * Reject (NAck) a Basic message
+   */
+  void basicNack(uint64_t delivery_tag,
+                 bool multiple = false,
+                 bool requeue = false);
   /**
    * Consumes a single message
    *
@@ -247,20 +338,42 @@ public:
    * @param consumer_tag Consumer ID (returned from \ref BasicConsume).
    * @returns The next message on the queue
    */
-  virtual AmqpEnvelope::Ptr basicConsumeMessage(
-    const std::string& consumer_tag) = 0;
+  AmqpEnvelope::Ptr basicConsumeMessage(const std::string& consumer_tag);
 
-  static Ptr createInstance(AmqpConnection::Ptr);
+  static Ptr createInstance(const AmqpConnection& conn)
+  {
+    return std::make_shared<AmqpChannel>(conn);
+  }
+
+  static Ptr createInstance(const AmqpConnection::Ptr conn)
+  {
+    return std::make_shared<AmqpChannel>(conn);
+  }
+
+private:
+  struct Impl;
+  /// PIMPL idiom
+  std::unique_ptr<Impl> m_impl;
+
+  AmqpChannel() = delete;
 };
 
 } // end namespace amqp
 
 class MessageBroker
 {
+  ///< `"request"` string constant
+  static const char* MESSAGE_TYPE_REQUEST;
+
+  ///< `"response"` string constant
+  static const char* MESSAGE_TYPE_RESPONSE;
+
+  ///< `"error"` string constant
+  static const char* MESSAGE_TYPE_ERROR;
+
 public:
   using Ptr = std::shared_ptr<MessageBroker>;
   using WPtr = std::weak_ptr<MessageBroker>;
-
   using Properties = amqp::AmqpProperties;
   using Message = amqp::AmqpMessage;
 
@@ -290,10 +403,9 @@ public:
     std::string routing_key = "";
   };
 
-  /**
-   * @brief      An AMQP message class intended for a "Request/Reply" pattern.
-   *             Use to build an RPC system: a client and a scalable RPC server.
-   */
+  /// An AMQP message class intended for a "Request/Reply" pattern. Use to build
+  /// an RPC system: a client and a scalable RPC server.
+  ///
   class Request : public Message
   {
   public:
@@ -301,17 +413,16 @@ public:
     using WPtr = std::weak_ptr<Request>;
   };
 
-  /**
-   * @brief      An AMQP message class intended for a "Request/Reply" pattern.
-   *             Use to build an RPC system: a client and a scalable RPC server.
-   */
+  /// An AMQP message class intended for a "Request/Reply" pattern. Use to build
+  /// an RPC system: a client and a scalable RPC server.
+  ///
   class Response : public Message
   {
   public:
     using Ptr = std::shared_ptr<Response>;
     using WPtr = std::weak_ptr<Response>;
 
-    virtual bool ok() const = 0;
+    inline bool ok() const { return properties().type != MESSAGE_TYPE_ERROR; }
   };
 
   /**
@@ -374,35 +485,34 @@ public:
   /// @param[in]  callback       The callback
   ///
   void subscribe(const Configuration& configuration,
-                 std::function<void(const Message::Ptr)> callback);
+                 std::function<void(const Message&)> callback);
 
   /// RPC messaging pattern for event subscription.
   ///
   /// @param[in]  configuration  The configuration
   /// @param[in]  callback       The callback
   ///
-  void subscribe(
-    const Configuration& configuration,
-    std::function<bool(const Request::Ptr, Response::Ptr)> callback);
+  void subscribe(const Configuration& configuration,
+                 std::function<bool(const Request&, Response&)> callback);
 
   /// Close all subscription and join threads.
   ///
   void close();
 
-protected:
-  std::tuple<std::string, std::string> setup(amqp::AmqpChannel::Ptr,
-                                             const Configuration&);
+  /// Generate random id
+  static const std::string generateReqId() const;
 
-  std::string m_host;
-  int m_port;
-  std::string m_username;
-  std::string m_password;
-  std::string m_vhost;
-  int m_frame_max;
-  std::vector<std::thread> m_threads;
-  std::atomic<bool> m_close{ false };
+protected:
+  template<typename T>
+  std::tuple<std::string, std::string> setupBroker(const Configuration& cfg,
+                                                   T&& channel);
+
+private:
+  struct Impl;
+  /// PIMPL idiom
+  std::unique_ptr<Impl> m_impl;
 };
 
-} // end namespace soft
+} // end namespace gs
 
 #endif // MESSAGE_BROKER_H
