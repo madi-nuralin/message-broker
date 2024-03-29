@@ -1,9 +1,9 @@
 #include <iostream>
 
 #include "../message_broker.hpp"
-
-using namespace soft;
-using namespace soft::amqp;
+#include <unistd.h>
+using namespace gs;
+using namespace gs::amqp;
 
 int main(int argc, char const *argv[])
 {
@@ -12,7 +12,12 @@ int main(int argc, char const *argv[])
 	cfg.exchange.name = "hello";
 	cfg.exchange.type = "fanout";
 	cfg.exchange.declare = true;
-	broker.publish(cfg, "hello");
+	for (int i = 0; i < 1000; ++i)
+	{
+		broker.publish(cfg, "hello");
+		usleep(1000);
+	}
+	
 
 	return 0;
 }

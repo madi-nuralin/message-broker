@@ -2,25 +2,29 @@
 
 #include "../message_broker.hpp"
 
-using namespace soft;
+using namespace gs;
 
-int main(int argc, char const *argv[])
+int
+main(int argc, char const* argv[])
 {
-	MessageBroker broker("localhost", 5672, "guest", "guest", "/");
-	MessageBroker::Configuration configuration;
+  MessageBroker broker("localhost", 5672, "guest", "guest", "/");
+  MessageBroker::Configuration configuration;
 
-	configuration.queue.exclusive = true;
-	configuration.queue.declare = true;
-	configuration.routing_key = "rpc_queue";
+  configuration.queue.exclusive = true;
+  configuration.queue.declare = true;
+  configuration.routing_key = "rpc_queue";
 
-	struct timeval timeout{5,0};
+  struct timeval timeout
+  {
+    5, 0
+  };
 
-	auto response = broker.publish(configuration, "30", &timeout);
+  auto response = broker.publish(configuration, "30", &timeout);
 
-	if (response->ok())
-	{
-		std::cout << "[.] Got  fib(" << 30 << ") = " <<  response->getBody() << std::endl;
-	}
+  if (response->ok()) {
+    std::cout << "[.] Got  fib(" << 30 << ") = " << response->body()
+              << std::endl;
+  }
 
   return 0;
 }
