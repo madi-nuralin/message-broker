@@ -17,14 +17,20 @@ namespace gs {
 
 namespace amqp {
 
-static inline std::string
+inline static std::string
 bytesToString(const amqp_bytes_t& x)
 {
   return std::string((char*)x.bytes, x.len);
 }
 
-static inline AmqpProperties
-getMessageProperties(const amqp_basic_properties_t& props)
+inline static amqp_bytes_t
+stringToBytes(const std::string& x)
+{
+  return amqp_cstring_bytes(x.c_str());
+}
+
+inline static AmqpProperties
+getAmqpProperties(const amqp_basic_properties_t& props)
 {
   AmqpProperties properties;
   if (props._flags & AMQP_BASIC_CONTENT_TYPE_FLAG)
@@ -54,8 +60,8 @@ getMessageProperties(const amqp_basic_properties_t& props)
   return properties;
 }
 
-static inline amqp_basic_properties_t
-getMessageProperties(const AmqpProperties& properties)
+inline static amqp_basic_properties_t
+getAmqpProperties(const AmqpProperties& properties)
 {
   amqp_basic_properties_t props;
   props._flags = 0;
@@ -151,44 +157,11 @@ checkConsumeMessageLibErr(int library_error,
   }
 }
 
-struct AmqpMessage::Impl
-{
-  std::string body;
-  AmqpProperties properties;
-};
-
-AmqpMessage::AmqpMessage()
-  : m_impl(new Impl)
-{
-}
+AmqpMessage::AmqpMessage() {}
 
 AmqpMessage::~AmqpMessage() {}
 
-const std::string&
-AmqpMessage::body() const noexcept
-{
-  return m_impl->body;
-}
-
-std::string&
-AmqpMessage::body() noexcept
-{
-  return m_impl->body;
-}
-
-const AmqpProperties&
-AmqpMessage::properties() const noexcept
-{
-  return m_impl->properties;
-}
-
-AmqpProperties&
-AmqpMessage::properties() noexcept
-{
-  return m_impl->properties;
-}
-
-AmqpEnvelope::AmqpEnvelope(const AmqpMessage::Ptr message,
+AmqpEnvelope::AmqpEnvelope(const AmqpMessage& message,
                            const std::string& consumer_tag,
                            const std::uint64_t delivery_tag,
                            const std::string& exchange,
@@ -270,10 +243,15 @@ const char* AmqpChannel::EXCHANGE_TYPE_TOPIC = "topic";
 AmqpChannel::AmqpChannel(const AmqpConnection::Ptr conn)
   : m_impl(new Impl)
 {
+  /** @todo The amqp_connection_state_t object is not synchronized. In order to use it
+   from multiple threads you would have to synchronize its use across threads
+   (provide some external mutual exclusion when calling any amqp_* function
+   that uses a common amqp_connection_state_t). In order to consume from
+   multiple channels you need to read messages from all the channels using
+   amqp_simple_wait_frame, then provide your own logic to handle messages from
+   different channels appropriately.*/
   m_impl->state = conn->m_impl->state;
-  // m_impl->state = *state_map[channel_pool[m_impl->channel]];
-
-  m_impl->channel = 1;
+  m_impl->channel = 1u;
 
   amqp_channel_open(m_impl->state, m_impl->channel);
   die_on_amqp_error(amqp_get_rpc_reply(m_impl->state), "channel.open");
@@ -364,11 +342,11 @@ AmqpChannel::queueUnbind(const std::string& queue_name,
 void
 AmqpChannel::basicPublish(const std::string& exchange,
                           const std::string& routing_key,
-                          const AmqpMessage::Ptr message,
+                          const AmqpMessage& message,
                           bool mandatory,
                           bool immediate)
 {
-  amqp_basic_properties_t props = getMessageProperties(message->properties());
+  amqp_basic_properties_t props = getAmqpProperties(message.properties());
   die_on_error(amqp_basic_publish(m_impl->state,
                                   m_impl->channel,
                                   amqp_cstring_bytes(exchange.c_str()),
@@ -376,7 +354,7 @@ AmqpChannel::basicPublish(const std::string& exchange,
                                   mandatory,
                                   immediate,
                                   &props,
-                                  amqp_cstring_bytes(message->body().c_str())),
+                                  amqp_cstring_bytes(message.body().c_str())),
                "basic.publish");
 }
 
@@ -457,19 +435,20 @@ AmqpChannel::basicConsumeMessage(const struct timeval* timeout)
     return nullptr;
   }
 
-  auto message = AmqpMessage::createInstance();
-  message->body() = bytesToString(envelope.message.body);
-  message->properties() = getMessageProperties(envelope.message.properties);
+  AmqpMessage message;
+  message.body() = bytesToString(envelope.message.body);
+  message.properties() = getAmqpProperties(envelope.message.properties);
 
-  auto env = AmqpEnvelope::createInstance(message,
-                                          bytesToString(envelope.consumer_tag),
-                                          envelope.delivery_tag,
-                                          bytesToString(envelope.exchange),
-                                          envelope.redelivered,
-                                          bytesToString(envelope.routing_key));
+  auto envelope2 =
+    AmqpEnvelope::createInstance(message,
+                                 bytesToString(envelope.consumer_tag),
+                                 envelope.delivery_tag,
+                                 bytesToString(envelope.exchange),
+                                 envelope.redelivered,
+                                 bytesToString(envelope.routing_key));
 
   amqp_destroy_envelope(&envelope);
-  return env;
+  return envelope2;
 }
 
 } // end namespace amqp
@@ -517,7 +496,8 @@ MessageBroker::MessageBroker(const std::string& host,
   m_impl->frame_max = frame_max;
 }
 
-MessageBroker::MessageBroker(const std::string& url, int frame_max) : m_impl(new Impl)
+MessageBroker::MessageBroker(const std::string& url, int frame_max)
+  : m_impl(new Impl)
 {
   std::srand(std::time(NULL));
 
@@ -545,7 +525,7 @@ MessageBroker::~MessageBroker()
 }
 
 const std::string
-MessageBroker::generateReqId()
+MessageBroker::generateRandomString()
 {
   static const char ALPHABET[] = { "0123456789"
                                    "abcdefgjhiklmnopqrstvwxyz"
@@ -564,7 +544,7 @@ const char* MessageBroker::MESSAGE_TYPE_RESPONSE = "response";
 const char* MessageBroker::MESSAGE_TYPE_ERROR = "error";
 
 void
-MessageBroker::publish(const Configuration& cfg, const std::string& messagebody)
+MessageBroker::publish(const Configuration& cfg, Message msg)
 {
   AmqpConnection::Ptr conn = AmqpConnection::createInstance();
   conn->open(m_impl->host, m_impl->port);
@@ -572,25 +552,21 @@ MessageBroker::publish(const Configuration& cfg, const std::string& messagebody)
     m_impl->vhost, m_impl->username, m_impl->password, m_impl->frame_max);
 
   AmqpChannel::Ptr channel = AmqpChannel::createInstance(conn);
-  auto [exchange, queue] = setupBroker(cfg, channel);
+  auto [exchange, queue] = setup(cfg, channel);
 
-  Message::Ptr msg = Message::createInstance();
-  msg->body() = messagebody;
-  msg->properties() = cfg.properties;
-
-  if (!msg->properties().content_type.has_value())
-    msg->properties().content_type = "application/json";
-  if (!msg->properties().delivery_mode.has_value())
-    msg->properties().delivery_mode = 2u;
-  if (!msg->properties().message_id.has_value())
-    msg->properties().message_id = generateReqId();
+  if (!msg.properties().content_type.has_value())
+    msg.properties().content_type = "application/json";
+  if (!msg.properties().delivery_mode.has_value())
+    msg.properties().delivery_mode = 2u;
+  if (!msg.properties().message_id.has_value())
+    msg.properties().message_id = generateRandomString();
 
   channel->basicPublish(exchange, cfg.routing_key, msg);
 }
 
 MessageBroker::Response::Ptr
 MessageBroker::publish(const Configuration& cfg,
-                       const std::string& messagebody,
+                       Request req,
                        struct timeval* timeout)
 {
   auto conn = AmqpConnection::createInstance();
@@ -599,43 +575,43 @@ MessageBroker::publish(const Configuration& cfg,
     m_impl->vhost, m_impl->username, m_impl->password, m_impl->frame_max);
 
   auto channel = AmqpChannel::createInstance(conn);
-  auto [exchange, reply_to] = setupBroker(cfg, channel);
+  auto [exchange, reply_to] = setup(cfg, channel);
 
-  auto req = Request::createInstance();
-  req->body() = messagebody;
-  req->properties() = cfg.properties;
-
-  if (!req->properties().content_type.has_value())
-    req->properties().content_type = "application/json";
-  if (!req->properties().delivery_mode.has_value())
-    req->properties().delivery_mode = 2u;
-  if (!req->properties().message_id.has_value())
-    req->properties().message_id = generateReqId();
-  if (!req->properties().correlation_id.has_value())
-    req->properties().correlation_id = generateReqId();
-  if (!req->properties().type.has_value())
-    req->properties().type = MESSAGE_TYPE_REQUEST;
+  if (!req.properties().content_type.has_value())
+    req.properties().content_type = "application/json";
+  if (!req.properties().delivery_mode.has_value())
+    req.properties().delivery_mode = 2u;
+  if (!req.properties().message_id.has_value())
+    req.properties().message_id = generateRandomString();
+  if (!req.properties().reply_to.has_value())
+    req.properties().reply_to = reply_to;
+  if (!req.properties().correlation_id.has_value())
+    req.properties().correlation_id = generateRandomString();
+  if (!req.properties().type.has_value())
+    req.properties().type = MESSAGE_TYPE_REQUEST;
 
   channel->basicPublish(exchange, cfg.routing_key, req);
   channel->basicConsume(reply_to);
 
   struct timeval tv = { 30, 0 };
-  Response::Ptr response;
+  Response::Ptr res;
 
   for (;;) {
     auto envelope = channel->basicConsumeMessage(timeout ? timeout : &tv);
     if (!envelope)
-      continue;
-    response = std::dynamic_pointer_cast<Response>(envelope->message());
+      return nullptr;
+    res = Response::createInstance();
+    res->body() = envelope->message().body();
+    res->properties() = envelope->message().properties();
     break;
   }
 
-  return response;
+  return res;
 }
 
 void
 MessageBroker::subscribe(const Configuration& cfg,
-                         std::function<void(const Message::Ptr)> callback)
+                         std::function<void(const Message&)> callback)
 {
   std::thread worker([this, cfg, callback]() {
     struct timeval tv = { 1, 0 };
@@ -645,14 +621,15 @@ MessageBroker::subscribe(const Configuration& cfg,
       m_impl->vhost, m_impl->username, m_impl->password, m_impl->frame_max);
 
     auto channel = AmqpChannel::createInstance(conn);
-    auto [exchange, queue] = setupBroker(cfg, channel);
+    auto [exchange, queue] = setup(cfg, channel);
     channel->basicConsume(queue);
 
     while (!m_impl->close) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       auto envelope = channel->basicConsumeMessage(&tv);
-      if (!envelope)
+      if (!envelope) {
         continue;
+      }
       callback(envelope->message());
     }
   });
@@ -663,7 +640,7 @@ MessageBroker::subscribe(const Configuration& cfg,
 void
 MessageBroker::subscribe(
   const Configuration& cfg,
-  std::function<bool(const Request::Ptr, Response::Ptr)> callback)
+  std::function<bool(const Request&, Response&)> callback)
 {
   std::thread worker([this, cfg, callback]() {
     struct timeval tv = { 1, 0 };
@@ -673,34 +650,35 @@ MessageBroker::subscribe(
       m_impl->vhost, m_impl->username, m_impl->password, m_impl->frame_max);
 
     auto channel = AmqpChannel::createInstance(conn);
-    auto [exchange, queue] = setupBroker(cfg, channel);
+    auto [exchange, queue] = setup(cfg, channel);
     channel->basicConsume(queue);
 
     while (!m_impl->close) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       auto envelope = channel->basicConsumeMessage(&tv);
-      if (!envelope)
+      if (!envelope) {
         continue;
+      }
 
-      Request::Ptr req = std::dynamic_pointer_cast<Request>(envelope->message());
-      Response::Ptr res;
+      Request req;
+      req.body() = envelope->message().body();
+      req.properties() = envelope->message().properties();
+      Response res;
 
       auto ok = callback(req, res);
+      std::string reply_to(req.properties().reply_to.value());
+      std::string correlation_id(req.properties().correlation_id.value());
 
-      std::string reply_to(envelope->message()->properties().reply_to.value());
-      std::string correlation_id(
-        envelope->message()->properties().correlation_id.value());
-
-      if (!res->properties().content_type.has_value())
-        res->properties().content_type = "application/json";
-      if (!res->properties().delivery_mode.has_value())
-        res->properties().delivery_mode = 2u;
-      if (!res->properties().message_id.has_value())
-        res->properties().message_id = generateReqId();
-      if (!res->properties().correlation_id.has_value())
-        res->properties().correlation_id = correlation_id;
-      if (!res->properties().type.has_value())
-        res->properties().type = ok ? MESSAGE_TYPE_RESPONSE : MESSAGE_TYPE_ERROR;
+      if (!res.properties().content_type.has_value())
+        res.properties().content_type = "application/json";
+      if (!res.properties().delivery_mode.has_value())
+        res.properties().delivery_mode = 2u;
+      if (!res.properties().message_id.has_value())
+        res.properties().message_id = generateRandomString();
+      if (!res.properties().correlation_id.has_value())
+        res.properties().correlation_id = correlation_id;
+      if (!res.properties().type.has_value())
+        res.properties().type = ok ? MESSAGE_TYPE_RESPONSE : MESSAGE_TYPE_ERROR;
 
       channel->basicPublish("", reply_to, res);
     }
@@ -716,12 +694,12 @@ MessageBroker::close()
 }
 
 std::tuple<std::string, std::string>
-MessageBroker::setupBroker(const Configuration& cfg, AmqpChannel::Ptr channel)
+MessageBroker::setup(const Configuration& cfg, AmqpChannel::Ptr channel)
 {
-  std::string exchange, queue;
+  std::string exchange_name, queue_name;
 
   if (cfg.exchange.name == "amq") {
-    exchange = "amq." + cfg.exchange.type;
+    exchange_name = "amq." + cfg.exchange.type;
   }
 
   if (cfg.exchange.declare) {
@@ -732,11 +710,11 @@ MessageBroker::setupBroker(const Configuration& cfg, AmqpChannel::Ptr channel)
                              cfg.exchange.auto_delete,
                              cfg.exchange.internal);
 
-    exchange = cfg.exchange.name;
+    exchange_name = cfg.exchange.name;
   }
 
   if (cfg.queue.declare) {
-    queue = channel->queueDeclare(cfg.queue.name,
+    queue_name = channel->queueDeclare(cfg.queue.name,
                                   cfg.queue.passive,
                                   cfg.queue.durable,
                                   cfg.queue.exclusive,
@@ -744,13 +722,14 @@ MessageBroker::setupBroker(const Configuration& cfg, AmqpChannel::Ptr channel)
   }
 
   if (cfg.queue.bind) {
-    channel->queueBind(
-      queue,
-      exchange,
-      cfg.routing_key); /// @todo replace with routing_pattern field
+    std::string binding_key =
+      cfg.exchange.type == AmqpChannel::EXCHANGE_TYPE_TOPIC
+        ? cfg.routing_pattern
+        : cfg.routing_key;
+    channel->queueBind(queue_name, exchange_name, binding_key);
   }
 
-  return std::make_tuple(exchange, queue);
+  return std::make_tuple(exchange_name, queue_name);
 }
 
 } // end namespace gs

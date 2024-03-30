@@ -62,10 +62,10 @@ int main(int argc, char const *argv[])
 	configuration.queue.name = "rpc_queue";
 	configuration.queue.declare = true;
 
-	broker.subscribe(configuration, [](const auto request, auto response){
-		auto number = std::stoi(request->body());
+	broker.subscribe(configuration, [](const auto& request, auto& response){
+		auto number = std::stoi(request.body());
 		std::cout << "[.] fib(" <<  number << ")" << std::endl;
-		response->body() = std::to_string(fib(number));
+		response.body() = std::to_string(fib(number));
 		return true;
 	});
 

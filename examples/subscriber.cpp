@@ -55,8 +55,8 @@ int main(int argc, char const *argv[])
 	configuration.queue.declare = true;
 	configuration.queue.bind = true;
 
-	broker.subscribe(configuration, [](const auto message) {
-		std::cout << "[x] Received b'" << message->body() << "'" << std::endl;
+	broker.subscribe(configuration, [](const auto& message) {
+		std::cout << "[x] Received b'" << message.body() << "'" << std::endl;
 	});
 
 	InterruptHandler::waitForUserInterrupt();

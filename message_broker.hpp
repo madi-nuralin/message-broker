@@ -40,21 +40,20 @@ public:
   /**
    * Gets the message body as a std::string&
    */
-  const std::string& body() const noexcept;
-  std::string& body() noexcept;
+  const std::string& body() const noexcept { return m_body; }
+  std::string& body() noexcept { return m_body; }
 
   /**
    * Gets the message properties as a AmqpProperties&
    */
-  const AmqpProperties& properties() const noexcept;
-  AmqpProperties& properties() noexcept;
+  const AmqpProperties& properties() const noexcept { return m_properties; }
+  AmqpProperties& properties() noexcept { return m_properties; }
 
   static Ptr createInstance() { return std::make_shared<AmqpMessage>(); }
 
 private:
-  struct Impl;
-  /// PIMPL idiom
-  std::unique_ptr<Impl> m_impl;
+  std::string m_body;
+  AmqpProperties m_properties;
 };
 
 class AmqpEnvelope
@@ -63,7 +62,7 @@ public:
   using Ptr = std::shared_ptr<AmqpEnvelope>;
   using WPtr = std::weak_ptr<AmqpEnvelope>;
 
-  AmqpEnvelope(const AmqpMessage::Ptr message,
+  AmqpEnvelope(const AmqpMessage& message,
                const std::string& consumer_tag,
                const std::uint64_t delivery_tag,
                const std::string& exchange,
@@ -71,7 +70,7 @@ public:
                const std::string& routing_key);
   virtual ~AmqpEnvelope();
 
-  inline AmqpMessage::Ptr message() const { return m_message; }
+  inline AmqpMessage message() const { return m_message; }
 
   inline std::string consumerTag() const { return m_consumerTag; }
 
@@ -83,7 +82,7 @@ public:
 
   inline std::string routingKey() const { return m_routingKey; }
 
-  static Ptr createInstance(const AmqpMessage::Ptr message,
+  static Ptr createInstance(const AmqpMessage& message,
                             const std::string& consumer_tag,
                             const std::uint64_t delivery_tag,
                             const std::string& exchange,
@@ -97,7 +96,7 @@ public:
 private:
   AmqpEnvelope() = delete;
 
-  const AmqpMessage::Ptr m_message;
+  const AmqpMessage m_message;
   const std::string m_consumerTag;
   const std::uint64_t m_deliveryTag;
   const std::string m_exchange;
@@ -122,7 +121,9 @@ public:
 
   static Ptr createInstance() { return std::make_shared<AmqpConnection>(); }
 
-  // private:
+private:
+  friend class AmqpChannel;
+
   struct Impl;
   /// PIMPL idiom
   std::unique_ptr<Impl> m_impl;
@@ -130,6 +131,7 @@ public:
 
 class AmqpChannel
 {
+public:
   ///< `"direct"` string constant
   static const char* EXCHANGE_TYPE_DIRECT;
 
@@ -139,7 +141,6 @@ class AmqpChannel
   ///< `"topic"` string constant
   static const char* EXCHANGE_TYPE_TOPIC;
 
-public:
   using Ptr = std::shared_ptr<AmqpChannel>;
   using WPtr = std::weak_ptr<AmqpChannel>;
 
@@ -257,7 +258,7 @@ public:
    */
   void basicPublish(const std::string& exchange,
                     const std::string& routing_key,
-                    const AmqpMessage::Ptr message,
+                    const AmqpMessage& message,
                     bool mandatory = false,
                     bool immediate = false);
 
@@ -372,6 +373,10 @@ public:
   using Properties = amqp::AmqpProperties;
   using Message = amqp::AmqpMessage;
 
+  /**
+   * @brief Class for specifying the RabbitMQ queue and exchange
+   * parameters, i.e. "queue_declare", "queue_bind".
+   */
   struct Configuration
   {
     struct
@@ -395,9 +400,10 @@ public:
       bool bind = false;
     } queue;
     std::string routing_key = "";
-    Properties properties;
+    std::string routing_pattern = "";
   };
 
+  ///
   /// An AMQP message class intended for a "Request/Reply" pattern. Use to build
   /// an RPC system: a client and a scalable RPC server.
   ///
@@ -406,10 +412,12 @@ public:
   public:
     using Ptr = std::shared_ptr<Request>;
     using WPtr = std::weak_ptr<Request>;
+    using Message::Message;
 
     static Ptr createInstance() { return std::make_shared<Request>(); }
   };
 
+  ///
   /// An AMQP message class intended for a "Request/Reply" pattern. Use to build
   /// an RPC system: a client and a scalable RPC server.
   ///
@@ -418,6 +426,7 @@ public:
   public:
     using Ptr = std::shared_ptr<Response>;
     using WPtr = std::weak_ptr<Response>;
+    using Message::Message;
 
     inline bool ok() const { return properties().type != MESSAGE_TYPE_ERROR; }
 
@@ -461,21 +470,21 @@ public:
   /// Basic messaging pattern for publish events.
   ///
   /// @param[in]  configuration  The configuration
-  /// @param[in]  messagebody    The messagebody
+  /// @param[in]  message        The messagebody
   ///
-  void publish(const Configuration& configuration,
-               const std::string& messagebody);
+  void publish(const Configuration& configuration, Message message);
 
   /// RPC messaging pattern for publish events.
   ///
   /// @param[in]  configuration  The configuration
-  /// @param[in]  messagebody    The messagebody
-  /// @param      timeout        The timeout
+  /// @param[in]  request        The request
+  /// @param      timeout        The timeout, if nullptr is passed then default
+  ///                            timeout will be applied
   ///
-  /// @return     { description_of_the_return_value }
+  /// @return     response on success, nullptr if failed to retrieve
   ///
   Response::Ptr publish(const Configuration& configuration,
-                        const std::string& messagebody,
+                        Request request,
                         struct timeval* timeout);
 
   /// Basic messaging pattern for event subscription.
@@ -484,30 +493,26 @@ public:
   /// @param[in]  callback       The callback
   ///
   void subscribe(const Configuration& configuration,
-                 std::function<void(const Message::Ptr)> callback);
+                 std::function<void(const Message&)> callback);
 
   /// RPC messaging pattern for event subscription.
   ///
   /// @param[in]  configuration  The configuration
   /// @param[in]  callback       The callback
   ///
-  void subscribe(
-    const Configuration& configuration,
-    std::function<bool(const Request::Ptr, Response::Ptr)> callback);
+  void subscribe(const Configuration& configuration,
+                 std::function<bool(const Request&, Response&)> callback);
 
   /// Close all subscription and join threads.
   ///
   void close();
 
   /// Generate random id
-  static const std::string generateReqId();
-
-protected:
-  std::tuple<std::string, std::string> setupBroker(
-    const Configuration& cfg,
-    amqp::AmqpChannel::Ptr channel);
+  static const std::string generateRandomString();
 
 private:
+  std::tuple<std::string, std::string> setup(const Configuration& cfg,                                             amqp::AmqpChannel::Ptr channel);
+
   struct Impl;
   /// PIMPL idiom
   std::unique_ptr<Impl> m_impl;

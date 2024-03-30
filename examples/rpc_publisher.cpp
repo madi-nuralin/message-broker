@@ -16,14 +16,19 @@ main(int argc, char const* argv[])
 
   struct timeval timeout
   {
-    5, 0
+    35, 0
   };
 
-  auto response = broker.publish(configuration, "30", &timeout);
+  MessageBroker::Request req;
+  req.body() = "30";
 
-  if (response->ok()) {
-    std::cout << "[.] Got  fib(" << 30 << ") = " << response->body()
-              << std::endl;
+  auto response = broker.publish(configuration, req, &timeout);
+
+  if (response) {
+    if (response->ok()) {
+      std::cout << "[.] Got  fib(" << 30 << ") = " << response->body()
+                << std::endl;
+    }
   }
 
   return 0;
