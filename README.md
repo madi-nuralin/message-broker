@@ -3,7 +3,23 @@
 A simple wrapper on rabbitmq-c (0.13>=).
 See examples and https://www.rabbitmq.com/getstarted.html for quick start.
 
-## 1) Basic Messaging pattern
+### some typical example
+```cpp
+AmqpConnection::Ptr conn = AmqpConnection::createInstance();
+conn->open(host, port);
+conn->login(vhost, username, password, frame_max);
+
+AmqpChannel::Ptr channel = AmqpChannel::createInstance(conn);
+channel->exchangeDeclare("hello", "fanout");
+
+Message msg;
+msg.body() = "{\"value":\"hello\"}";
+msg.properties().content_type = "application/json";
+msg.properties().delivery_mode = 2u;
+
+channel->basicPublish("hello", "", msg);
+```
+### 1) Basic Messaging pattern
 
 Publisher:
 ```cpp
@@ -37,7 +53,7 @@ broker.subscribe(configuration, [](const auto& message) {
 ```
 
 
-## 2) Request/Response pattern
+### 2) Request/Response pattern
 
 Publisher:
 ```cpp
