@@ -8,7 +8,7 @@ using namespace gs::amqp;
 int main(int argc, char const *argv[])
 {
 
-	MessageBroker broker("amqp://guest:guest@172.16.172.12:5672");
+	MessageBroker broker("amqp://guest:guest@localhost:5672");
 	MessageBroker::Configuration cfg;
 	MessageBroker::Message msg;
 
