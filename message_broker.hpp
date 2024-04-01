@@ -2,13 +2,116 @@
 #define MESSAGE_BROKER_H
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace gs {
 namespace amqp {
+
+/**
+ * AmqpTable key
+ *
+ * Note this must be less than 128 bytes long
+ */
+using AmqpTableKey = std::string;
+
+class AmqpTableValue;
+
+using AmqpTable = std::map<AmqpTableKey, AmqpTableValue>;
+
+using AmqpTableEntry = AmqpTable::value_type;
+
+class AmqpTableValue
+{
+public:
+  /** Types enumeration */
+  enum ValueType
+  {
+    VT_bool = 0,       ///< boolean type
+    VT_int8 = 1,       ///< 1-byte/char signed type
+    VT_int16 = 2,      ///< 2-byte/short signed type
+    VT_int32 = 3,      ///< 4-byte/int signed type
+    VT_int64 = 4,      ///< 8-byte/long long int signed type
+    VT_float = 5,      ///< single-precision floating point type
+    VT_double = 6,     ///< double-precision floating point type
+    VT_string = 7,     ///< string type
+    VT_array = 8,      ///< array of TableValues type
+    VT_table = 9,      ///< a table type
+    VT_uint8 = 10,     ///< 1-byte/char unsigned type
+    VT_uint16 = 11,    ///< 2-byte/short unsigned type
+    VT_uint32 = 12,    ///< 4-byte/int unsigned type
+    VT_uint64 = 13     ///< 8-byte/long long unsigned type
+  };
+
+  AmqpTableValue(const AmqpTableValue& l);
+
+  AmqpTableValue(bool value);
+
+  AmqpTableValue(std::uint8_t value);
+
+  AmqpTableValue(std::int8_t value);
+
+  AmqpTableValue(std::uint16_t value);
+
+  AmqpTableValue(std::int16_t value);
+
+  AmqpTableValue(std::uint32_t value);
+
+  AmqpTableValue(std::int32_t value);
+
+  AmqpTableValue(std::uint64_t value);
+
+  AmqpTableValue(std::int64_t value);
+
+  AmqpTableValue(float value);
+
+  AmqpTableValue(double value);
+
+  AmqpTableValue(const char* value);
+
+  AmqpTableValue(const std::string& value);
+
+  virtual ~AmqpTableValue();
+
+  ValueType getType() const;
+
+  bool getBool() const;
+
+  std::uint8_t getUint8() const;
+
+  std::int8_t getInt8() const;
+
+  std::uint16_t getUint16() const;
+
+  std::int16_t getInt16() const;
+
+  std::uint32_t getUint32() const;
+
+  std::int32_t getInt32() const;
+
+  std::uint64_t getUint64() const;
+
+  std::int64_t getInt64() const;
+
+  float getFloat() const;
+
+  double getDouble() const;
+
+  std::string getString() const;
+
+  std::vector<AmqpTableValue> getArray() const;
+
+  AmqpTable getTable() const;
+
+private:
+  struct Impl;
+  /// PIMPL idiom
+  std::unique_ptr<Impl> m_impl;
+};
 
 /** basic class properties */
 struct AmqpProperties
@@ -172,6 +275,32 @@ public:
     bool internal = false);
 
   /**
+   * Declares an exchange
+   *
+   * Creates an exchange on the AMQP broker if it does not already exist
+   * @param exchange_name the name of the exchange
+   * @param exchange_type the type of exchange to be declared. Defaults to
+   * `direct`; other types that could be used: `fanout`, `topic`
+   * @param passive Indicates how the broker should react if the exchange does
+   * not exist. If passive is `true` and the exhange does not exist the broker
+   * will respond with an error and not create the exchange; exchange is created
+   * otherwise. Defaults to `false` (exchange is created if needed)
+   * @param durable Indicates whether the exchange is durable - e.g., will it
+   * survive a broker restart
+   * @param auto_delete Indicates whether the exchange will automatically be
+   * removed when no queues are bound to it.
+   * @param arguments A table of additional arguments used when creating the
+   * exchange
+   */
+  void exchangeDeclare(const std::string& exchange_name,
+                       const std::string& exchange_type,
+                       bool passive,
+                       bool durable,
+                       bool auto_delete,
+                       bool internal,
+                       const AmqpTable& arguments);
+
+  /**
    * Binds one exchange to another exchange using a given key
    * @param destination the name of the exchange to route messages to
    * @param source the name of the exchange to route messages from
@@ -216,6 +345,33 @@ public:
                            bool durable = false,
                            bool exclusive = true,
                            bool auto_delete = true);
+
+  /**
+   * Declares a queue
+   *
+   * Creates a queue on the AMQP broker if it does not already exist.
+   * @param queue_name The desired name of the queue. If this is an empty
+   * string, the broker will generate a queue name that this method will return.
+   * @param passive Indicated how the broker should react if the queue does not
+   * exist. The broker will raise an error if the queue doesn't already exist
+   * and passive is `true`. With passive `false` (the default), the queue gets
+   * created automatically, if needed.
+   * @param durable Indicates whether the exchange is durable - e.g., will it
+   * survive a broker restart.
+   * @param exclusive Indicates that only client can use the queue. Defaults to
+   * true. An exclusive queue is deleted when the connection is closed.
+   * @param auto_delete the queue will be deleted after at least one exchange
+   * has been bound to it, then has been unbound
+   * @param arguments A table of additional arguments
+   * @returns The name of the queue created on the broker. Used mostly when the
+   * broker is asked to create a unique queue by not providing a queue name.
+   */
+  std::string queueDeclare(const std::string& queue_name,
+                           bool passive,
+                           bool durable,
+                           bool exclusive,
+                           bool auto_delete,
+                           const AmqpTable& arguments);
 
   /**
    * Binds a queue to an exchange
@@ -372,6 +528,10 @@ public:
   using WPtr = std::weak_ptr<MessageBroker>;
   using Properties = amqp::AmqpProperties;
   using Message = amqp::AmqpMessage;
+  using Table = amqp::AmqpTable;
+  using TableEntry = amqp::AmqpTableEntry;
+  using TableKey = amqp::AmqpTableKey;
+  using TableValue = amqp::AmqpTableValue;
 
   /**
    * @brief Class for specifying the RabbitMQ queue and exchange
@@ -388,6 +548,7 @@ public:
       bool auto_delete = false;
       bool internal = false;
       bool declare = false;
+      std::optional<Table> arguments;
     } exchange;
     struct
     {
@@ -398,6 +559,7 @@ public:
       bool exclusive = false;
       bool declare = false;
       bool bind = false;
+      std::optional<Table> arguments;
     } queue;
     std::string routing_key = "";
     std::string routing_pattern = "";
@@ -511,7 +673,8 @@ public:
   static const std::string generateRandomString();
 
 private:
-  std::tuple<std::string, std::string> setup(const Configuration& cfg,                                             amqp::AmqpChannel::Ptr channel);
+  std::tuple<std::string, std::string> setup(const Configuration& cfg,
+                                             amqp::AmqpChannel::Ptr channel);
 
   struct Impl;
   /// PIMPL idiom
